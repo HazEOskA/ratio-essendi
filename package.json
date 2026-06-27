@@ -1,10 +1,20 @@
 {
   "name": "ratio-essendi",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "RATIO ESSENDI — system-of-systems agentic architecture (scaffold).",
-  "workspaces": [
-    "packages/*"
+  "description": "System-of-systems architecture foundation for Ratio Essendi / Product Factory Core.",
+  "scripts": {
+    "docs:check": "echo 'Docs-only architecture lock. No build yet.'",
+    "test": "echo 'No tests yet. MVP contracts first.'"
+  },
+  "keywords": [
+    "ratio-essendi",
+    "product-factory",
+    "system-of-systems",
+    "agent-succession",
+    "core-cells",
+    "failover",
+    "drift-rule"
   ],
   "license": "UNLICENSED"
 }
