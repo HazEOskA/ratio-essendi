@@ -10,7 +10,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@ratio-essendi/shared": "*"
+    "@ratio-essendi/shared": "*",
+    "@ratio-essendi/event-log": "*"
   },
   "license": "UNLICENSED"
 }

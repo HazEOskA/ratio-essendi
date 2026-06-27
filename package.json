@@ -11,7 +11,7 @@
     "docs:check": "echo 'Docs-only architecture lock. No build yet.'",
     "typecheck": "tsc --noEmit",
     "proof": "tsx tests/proof.ts",
-    "test": "tsx --test tests/first-technical-proof.test.ts"
+    "test": "tsx --test tests/*.test.ts"
   },
   "keywords": [
     "ratio-essendi",
