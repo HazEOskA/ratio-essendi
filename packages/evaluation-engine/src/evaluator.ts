@@ -1,6 +1,6 @@
 import type { AgentContract, SystemEvent } from "@ratio-essendi/shared"
 import { newId, nowIso } from "@ratio-essendi/shared"
-import { appendEvent } from "@ratio-essendi/event-log"
+import { defaultLog, type EventSink } from "@ratio-essendi/event-log"
 
 export type EvaluationResult = {
   agentId: string
@@ -23,6 +23,7 @@ export function evaluateAgent(
   agentId: string,
   output: string,
   kpis: AgentContract["kpis"],
+  sink: EventSink = defaultLog,
 ): EvaluationResult {
   const haystack = output.toLowerCase()
   const failureReasons: string[] = []
@@ -49,7 +50,7 @@ export function evaluateAgent(
       reason: `Agent ${agentId} scored ${score} (>= ${PASS_THRESHOLD}).`,
       createdAt: timestamp,
     }
-    appendEvent(event)
+    sink.record(event)
   } else {
     const event: SystemEvent = {
       id: newId("evt"),
@@ -61,7 +62,7 @@ export function evaluateAgent(
       evidence: failureReasons,
       createdAt: timestamp,
     }
-    appendEvent(event)
+    sink.record(event)
   }
 
   return { agentId, passed, score, failureReasons, timestamp }

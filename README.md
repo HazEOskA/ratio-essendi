@@ -63,10 +63,17 @@ validation criteria.
 
 ```bash
 npm install
+npm run factory     # value demo: weak producers auto-replaced, KPI uplift scorecard
 npm run proof       # human-readable event log + validation
 npm test            # node:test assertions
 npm run typecheck   # strict tsc --noEmit across the monorepo
 ```
+
+`npm run factory` runs a Sales Factory season: agents produce offers, the
+system scores them against KPIs, detects weak value-producers, replaces them
+via succession, and reports the uplift in a revenue-relevant metric — every
+decision recorded in one event log. (Outputs are simulated; the dollar figure
+is an explicit model assumption, not real revenue.)
 
 Implemented packages: `shared`, `event-log`, `cell-health`, `system-registry`,
 `agent-registry`, `evaluation-engine`, `agent-succession`, `failover-engine`,
