@@ -97,6 +97,13 @@ export async function runOfferAgent(
     }
   }
 
+  // A producer that failed twice is no longer active — take it out of service
+  // so the dashboard and listAgents() consumers don't count it as active.
+  gov.agents.setStatus(
+    activeAgentId,
+    "disabled",
+    "Offer blocked after succession; agent taken out of service.",
+  )
   gov.log.append({
     eventType: "agent.blocked",
     entityId: activeAgentId,

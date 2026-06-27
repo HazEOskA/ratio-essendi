@@ -59,3 +59,34 @@ test("judged offer flow drives succession on a weak first draft, then passes", a
     "succession recorded in the log",
   )
 })
+
+test("a fully failing offer flow disables the blocked agent (not left active)", async () => {
+  const alwaysWeak: OfferProvider = { generateOffer: () => Promise.resolve(WEAK) }
+  const gov = new MetaGovernor()
+  const cell = gov.registerCell({
+    name: "Sales Factory",
+    domain: "sales",
+    purpose: "p",
+    memoryScope: "sales/offers",
+    budgetLimit: 1000,
+    kpis: KPIS,
+  })
+
+  const result = await runOfferAgent(
+    gov,
+    cell.id,
+    { icp: "founders", product: "sprint", constraints: ["fixed scope"], kpis: KPIS },
+    alwaysWeak,
+    new HeuristicJudge(),
+  )
+
+  assert.equal(result.status, "blocked")
+  assert.equal(result.passed, false)
+  assert.equal(result.sent, false)
+  assert.equal(gov.agents.getAgent(result.agentId).status, "disabled", "blocked agent taken out of service")
+  assert.equal(
+    gov.agents.listAgents().filter((a) => a.status === "active").length,
+    0,
+    "no blocked agent is counted as active",
+  )
+})

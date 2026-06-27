@@ -54,10 +54,13 @@ export class MetaGovernor {
   detectDrift(input: DriftInput): DriftEvent | null {
     const event = computeDrift(input)
     if (event) {
+      // Preserve the audited entity type. SystemEvent has no "llm_session",
+      // so map it to "system" while keeping it visible in the event type.
+      const logEntityType = event.entityType === "llm_session" ? "system" : event.entityType
       this.log.append({
-        eventType: "agent.drift_detected",
+        eventType: `${event.entityType}.drift_detected`,
         entityId: event.entityId,
-        entityType: "agent",
+        entityType: logEntityType,
         nextState: event.action,
         reason: `Drift signals: ${event.driftSignals.join(", ")}.`,
       })
