@@ -54,3 +54,21 @@ The first MVP proves that the system can:
 No alignment → no input.  
 No input → no work.  
 No work → no system presence.
+
+## Running the MVP proof
+
+The first technical proof (docs/14) runs the 10-step lifecycle end-to-end in
+memory — no money spent, no external action, no UI — and asserts the six
+validation criteria.
+
+```bash
+npm install
+npm run proof       # human-readable event log + validation
+npm test            # node:test assertions
+npm run typecheck   # strict tsc --noEmit across the monorepo
+```
+
+Implemented packages: `shared`, `event-log`, `cell-health`, `system-registry`,
+`agent-registry`, `evaluation-engine`, `agent-succession`, `failover-engine`,
+`meta-governor`. Still scaffold (intentionally — anti-sprawl, docs/05):
+`system-cell`, `agent-factory`, `memory-layer`.

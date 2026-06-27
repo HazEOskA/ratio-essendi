@@ -2,6 +2,7 @@
   "name": "ratio-essendi",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "System-of-systems architecture foundation for Ratio Essendi / Product Factory Core.",
   "workspaces": [
     "packages/*"
@@ -9,7 +10,8 @@
   "scripts": {
     "docs:check": "echo 'Docs-only architecture lock. No build yet.'",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'No tests yet. MVP contracts first.'"
+    "proof": "tsx tests/proof.ts",
+    "test": "tsx --test tests/first-technical-proof.test.ts"
   },
   "keywords": [
     "ratio-essendi",
@@ -22,6 +24,8 @@
   ],
   "license": "UNLICENSED",
   "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }
 }

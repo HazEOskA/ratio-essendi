@@ -7,3 +7,5 @@ export type {
   SystemEvent,
   FailoverPolicy,
 } from "./types.js"
+
+export { newId, nowIso, resetIds } from "./ids.js"

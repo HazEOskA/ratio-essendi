@@ -1,0 +1,17 @@
+{
+  "name": "@ratio-essendi/agent-registry",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent registry: contracts, lifecycle status and lineage (docs/03, docs/04).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ratio-essendi/shared": "*",
+    "@ratio-essendi/event-log": "*"
+  },
+  "license": "UNLICENSED"
+}
