@@ -1,20 +1,24 @@
 import type { MetaGovernor } from "@ratio-essendi/meta-governor"
-import { evaluateAgent } from "@ratio-essendi/evaluation-engine"
+import { evaluateAgent, type JudgeProvider } from "@ratio-essendi/evaluation-engine"
 import type { OfferBrief, OfferProvider, OfferAgentResult } from "./types.js"
+
+type Grade = { passed: boolean; score: number; reasons: string[] }
 
 /**
  * Run one offer-builder agent end-to-end on a cell:
- * generate → evaluate against KPIs → (succession if weak) → approval gate.
+ * generate → grade → (succession if weak) → approval gate.
  *
- * The approval gate (docs/13) is the hard boundary: a good offer is held at
- * `pending_approval` and is NEVER auto-sent. No money is spent, nothing leaves
- * the system without a human.
+ * Grading: with a {@link JudgeProvider} the offer is graded on quality (clarity,
+ * ICP-fit, margin, CTA); without one it falls back to KPI-presence checking.
+ * Either way the approval gate (docs/13) holds a good offer at `pending_approval`
+ * and NEVER auto-sends.
  */
 export async function runOfferAgent(
   gov: MetaGovernor,
   cellId: string,
   brief: OfferBrief,
   provider: OfferProvider,
+  judge?: JudgeProvider,
 ): Promise<OfferAgentResult> {
   const kpis = brief.kpis
 
@@ -32,32 +36,47 @@ export async function runOfferAgent(
     forbiddenActions: ["send to client", "publish externally", "spend over budget"],
   })
 
+  const grade = async (agentId: string, text: string): Promise<Grade> => {
+    if (judge) {
+      const verdict = await judge.judge({
+        output: text,
+        context: `ICP: ${brief.icp}; KPIs: ${kpis.join(", ")}`,
+      })
+      gov.agents.recordEvaluation(
+        agentId,
+        verdict.verdict,
+        `Judge ${verdict.score}: ${verdict.reasons.join("; ") || "strong"}`,
+      )
+      return { passed: verdict.passed, score: verdict.score, reasons: verdict.reasons }
+    }
+    const result = evaluateAgent(agentId, text, kpis, gov.log)
+    return { passed: result.passed, score: result.score, reasons: result.failureReasons }
+  }
+
   let offer = await provider.generateOffer(brief)
-  let result = evaluateAgent(agent.id, offer, kpis, gov.log)
+  let result = await grade(agent.id, offer)
   let attempts = 1
   let activeAgentId = agent.id
   let successorId: string | undefined
 
   if (!result.passed) {
-    // Weak value-producer → succession → regenerate with the successor (docs/06).
     const successionBrief = gov.requestSuccession({
       failedAgent: gov.agents.getAgent(agent.id),
       failureType: "agent_error",
-      failureSummary: `Weak offer: ${result.failureReasons.join(", ")}`,
-      repeatedWeaknesses: result.failureReasons,
+      failureSummary: `Weak offer: ${result.reasons.join(", ")}`,
+      repeatedWeaknesses: result.reasons,
       evidence: gov.log.byEntity(agent.id).map((e) => e.eventType),
     })
     const successor = gov.promoteSuccessor(gov.agents.getAgent(agent.id), successionBrief)
     successorId = successor.id
     activeAgentId = successor.id
 
-    offer = await provider.generateOffer({ ...brief, emphasize: result.failureReasons })
-    result = evaluateAgent(successor.id, offer, kpis, gov.log)
+    offer = await provider.generateOffer({ ...brief, emphasize: result.reasons })
+    result = await grade(successor.id, offer)
     attempts = 2
   }
 
   if (result.passed) {
-    // Approval gate (docs/13): never auto-send.
     gov.log.append({
       eventType: "approval.required",
       entityId: activeAgentId,
@@ -82,7 +101,7 @@ export async function runOfferAgent(
     eventType: "agent.blocked",
     entityId: activeAgentId,
     entityType: "agent",
-    reason: "Offer still below KPI threshold after succession; not sent.",
+    reason: "Offer still below quality threshold after succession; not sent.",
   })
   return {
     agentId: activeAgentId,

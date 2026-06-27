@@ -66,6 +66,7 @@ npm install
 npm run dashboard:serve  # LIVE ops dashboard (refresh, controls, LLM report); state persists to .data/ and restores on restart
 npm run dashboard   # generate dashboard.html — read-only snapshot of cells, agents and decisions
 npm run offer       # real output: an offer-builder agent drafts an offer, held at the approval gate
+npm run judge       # LLM-as-judge: grade offer quality (clarity/ICP-fit/margin/CTA), not just KPI presence
 npm run factory     # value demo: weak producers auto-replaced, KPI uplift scorecard
 npm run proof       # human-readable event log + validation
 npm test            # node:test assertions

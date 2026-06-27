@@ -13,6 +13,7 @@
     "proof": "tsx tests/proof.ts",
     "factory": "tsx tests/factory-run.ts",
     "offer": "tsx tests/offer-run.ts",
+    "judge": "tsx tests/judge-run.ts",
     "dashboard": "tsx tests/dashboard-run.ts",
     "dashboard:serve": "tsx tests/dashboard-serve.ts",
     "test": "tsx --test tests/*.test.ts"
