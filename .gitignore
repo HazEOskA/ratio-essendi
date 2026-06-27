@@ -5,6 +5,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# generated artifacts
+dashboard.html
+*.png
+
 # logs
 *.log
 npm-debug.log*

@@ -1,0 +1,17 @@
+{
+  "name": "@ratio-essendi/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only operations dashboard: cells, agents and decisions as a single HTML file (docs/14).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ratio-essendi/shared": "*",
+    "@ratio-essendi/meta-governor": "*"
+  },
+  "license": "UNLICENSED"
+}
