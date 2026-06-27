@@ -1,0 +1,10 @@
+{
+  "name": "ratio-essendi",
+  "version": "0.0.0",
+  "private": true,
+  "description": "RATIO ESSENDI — system-of-systems agentic architecture (scaffold).",
+  "workspaces": [
+    "packages/*"
+  ],
+  "license": "UNLICENSED"
+}
