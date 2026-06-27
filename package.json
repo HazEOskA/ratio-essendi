@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "proof": "tsx tests/proof.ts",
     "factory": "tsx tests/factory-run.ts",
+    "offer": "tsx tests/offer-run.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "keywords": [

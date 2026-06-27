@@ -63,10 +63,27 @@ validation criteria.
 
 ```bash
 npm install
+npm run offer       # real output: an offer-builder agent drafts an offer, held at the approval gate
 npm run factory     # value demo: weak producers auto-replaced, KPI uplift scorecard
 npm run proof       # human-readable event log + validation
 npm test            # node:test assertions
 npm run typecheck   # strict tsc --noEmit across the monorepo
+```
+
+### Real output (`npm run offer`)
+
+The first product agent (`@ratio-essendi/offer-builder`) generates a real offer
+with Claude (`claude-opus-4-8`), the evaluation engine scores it against KPIs,
+and the **approval gate (docs/13) blocks any external send** — a good offer is
+held at `pending_approval` and never auto-sent. No money is spent.
+
+- With `ANTHROPIC_API_KEY` set → live Claude generation.
+- Without a key → a deterministic stub runs the exact same pipeline offline, so
+  the flow (and `npm test`) always works.
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... npm run offer   # live
+npm run offer                                # offline stub
 ```
 
 `npm run factory` runs a Sales Factory season: agents produce offers, the
