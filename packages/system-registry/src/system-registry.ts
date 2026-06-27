@@ -122,6 +122,12 @@ export class SystemRegistry {
     this.#cells.set(cell.id, cell)
   }
 
+  /** Replace all cells from a persisted snapshot. */
+  restore(cells: readonly SystemCell[]): void {
+    this.#cells.clear()
+    for (const cell of cells) this.#cells.set(cell.id, cell)
+  }
+
   setActiveController(cellId: string, active: boolean): void {
     const cell = this.getCell(cellId)
     if (active) this.#assertNoActiveController(cell.domain)

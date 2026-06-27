@@ -20,3 +20,16 @@ export function nowIso(): string {
 export function resetIds(): void {
   counters.clear()
 }
+
+/** Snapshot the id counters (for persistence). */
+export function exportIdState(): Record<string, number> {
+  return Object.fromEntries(counters)
+}
+
+/** Restore id counters so minted ids continue without collision after a restart. */
+export function importIdState(state: Record<string, number>): void {
+  counters.clear()
+  for (const [prefix, value] of Object.entries(state)) {
+    counters.set(prefix, value)
+  }
+}

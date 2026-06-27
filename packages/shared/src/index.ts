@@ -8,4 +8,4 @@ export type {
   FailoverPolicy,
 } from "./types.js"
 
-export { newId, nowIso, resetIds } from "./ids.js"
+export { newId, nowIso, resetIds, exportIdState, importIdState } from "./ids.js"

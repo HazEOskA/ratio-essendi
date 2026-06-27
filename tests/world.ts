@@ -1,40 +1,106 @@
-import { resetIds } from "@ratio-essendi/shared"
+import {
+  resetIds,
+  exportIdState,
+  importIdState,
+  type AgentContract,
+  type SystemCell,
+  type SystemEvent,
+} from "@ratio-essendi/shared"
 import { MetaGovernor } from "@ratio-essendi/meta-governor"
 import { evaluateAgent } from "@ratio-essendi/evaluation-engine"
 import { StubOfferProvider, type OfferProvider } from "@ratio-essendi/offer-builder"
 import { buildSnapshot, type LiveState, type PendingOffer } from "@ratio-essendi/dashboard"
+import type { FileStore } from "./store.js"
 
 const KPIS = ["offer", "price", "margin", "call to action"]
 
+/** Everything needed to reconstruct a World after a restart. */
+export type WorldSnapshot = {
+  version: 1
+  cellId: string
+  cells: SystemCell[]
+  agents: AgentContract[]
+  events: SystemEvent[]
+  pending: PendingOffer[]
+  paused: boolean
+  seq: number
+  ids: Record<string, number>
+}
+
+export type WorldOptions = {
+  provider?: OfferProvider
+  store?: FileStore<WorldSnapshot>
+  snapshot?: WorldSnapshot
+}
+
 /**
- * A live, mutable "world" the dashboard drives: a MetaGovernor plus pending
- * offers. tick() generates activity (offers and the occasional drifter); the
- * operator actions are real lifecycle changes. Nothing is ever sent externally.
+ * A live, mutable "world" the dashboard drives. State + log persist to a file
+ * store after every mutation and are restored on start, so the world survives a
+ * server restart. Determinism is preserved by restoring the id counters and the
+ * sim sequence, not just the data.
  */
 export class World {
   readonly gov = new MetaGovernor()
-  readonly #cellId: string
-  readonly #pending: PendingOffer[] = []
+  #cellId: string
+  #pending: PendingOffer[] = []
   readonly #provider: OfferProvider
+  readonly #store?: FileStore<WorldSnapshot>
   #paused = false
   #seq = 0
 
-  constructor(provider: OfferProvider = new StubOfferProvider()) {
-    resetIds()
-    this.#provider = provider
-    const cell = this.gov.registerCell({
-      name: "Sales Factory",
-      domain: "sales",
-      purpose: "Generate profitable booked calls for the selected ICP.",
-      memoryScope: "sales/offers",
-      budgetLimit: 1000,
-      kpis: KPIS,
-    })
-    this.#cellId = cell.id
+  constructor(opts: WorldOptions = {}) {
+    this.#provider = opts.provider ?? new StubOfferProvider()
+    this.#store = opts.store
+
+    if (opts.snapshot) {
+      this.#cellId = opts.snapshot.cellId
+      this.#loadSnapshot(opts.snapshot)
+    } else {
+      resetIds()
+      const cell = this.gov.registerCell({
+        name: "Sales Factory",
+        domain: "sales",
+        purpose: "Generate profitable booked calls for the selected ICP.",
+        memoryScope: "sales/offers",
+        budgetLimit: 1000,
+        kpis: KPIS,
+      })
+      this.#cellId = cell.id
+      this.#persist()
+    }
+  }
+
+  #loadSnapshot(snap: WorldSnapshot): void {
+    importIdState(snap.ids)
+    this.gov.cells.restore(snap.cells)
+    this.gov.agents.restore(snap.agents)
+    this.gov.log.restore(snap.events)
+    this.#pending = snap.pending.map((p) => ({ ...p }))
+    this.#paused = snap.paused
+    this.#seq = snap.seq
+  }
+
+  toSnapshot(): WorldSnapshot {
+    return {
+      version: 1,
+      cellId: this.#cellId,
+      cells: [...this.gov.cells.listCells()],
+      agents: [...this.gov.agents.listAgents()],
+      events: [...this.gov.log.all()],
+      pending: this.#pending.map((p) => ({ ...p })),
+      paused: this.#paused,
+      seq: this.#seq,
+      ids: exportIdState(),
+    }
+  }
+
+  #persist(): void {
+    this.#store?.save(this.toSnapshot())
   }
 
   setPaused(value: boolean): void {
     this.#paused = value
+    this.#persist()
   }
 
   #register(name: string) {
@@ -82,6 +148,7 @@ export class World {
         createdAt: new Date().toISOString(),
       })
     }
+    this.#persist()
   }
 
   injectDrift(): void {
@@ -97,6 +164,7 @@ export class World {
       })
       this.gov.agents.setStatus(agent.id, "succession_required", `Drift detected: ${result.failureReasons.join(", ")}`)
     }
+    this.#persist()
   }
 
   async tick(): Promise<void> {
@@ -117,6 +185,7 @@ export class World {
       nextState: "approved",
       reason: "Operator approved offer (decision recorded; no external send is wired).",
     })
+    this.#persist()
   }
 
   reject(offerId: string): void {
@@ -132,10 +201,12 @@ export class World {
       nextState: "rejected",
       reason: "Operator rejected offer.",
     })
+    this.#persist()
   }
 
   quarantine(agentId: string): void {
     this.gov.agents.setStatus(agentId, "disabled", "Operator quarantined the agent.")
+    this.#persist()
   }
 
   forceSuccession(agentId: string): void {
@@ -147,6 +218,7 @@ export class World {
       evidence: this.gov.log.byEntity(agentId).map((e) => e.eventType),
     })
     this.gov.promoteSuccessor(this.gov.agents.getAgent(agentId), brief)
+    this.#persist()
   }
 
   async action(action: string, id: string): Promise<void> {

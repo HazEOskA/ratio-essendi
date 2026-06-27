@@ -96,6 +96,12 @@ export class AgentRegistry {
     return [...this.#agents.values()]
   }
 
+  /** Replace all agents from a persisted snapshot. */
+  restore(agents: readonly AgentContract[]): void {
+    this.#agents.clear()
+    for (const agent of agents) this.#agents.set(agent.id, agent)
+  }
+
   activate(agentId: string): AgentContract {
     return this.setStatus(agentId, "active", "Agent activated.")
   }

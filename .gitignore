@@ -9,6 +9,9 @@ dist/
 dashboard.html
 *.png
 
+# persisted runtime state
+.data/
+
 # logs
 *.log
 npm-debug.log*

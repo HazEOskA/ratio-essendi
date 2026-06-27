@@ -38,6 +38,12 @@ export class EventLog {
     this.#events.length = 0
   }
 
+  /** Replace the log contents from a persisted snapshot. */
+  restore(events: readonly SystemEvent[]): void {
+    this.#events.length = 0
+    for (const event of events) this.#events.push(event)
+  }
+
   all(): readonly SystemEvent[] {
     return this.#events
   }
