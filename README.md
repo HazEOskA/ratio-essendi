@@ -63,7 +63,8 @@ validation criteria.
 
 ```bash
 npm install
-npm run dashboard   # generate dashboard.html — read-only view of cells, agents and decisions
+npm run dashboard:serve  # LIVE ops dashboard at http://127.0.0.1:7777 (refresh, controls, LLM report)
+npm run dashboard   # generate dashboard.html — read-only snapshot of cells, agents and decisions
 npm run offer       # real output: an offer-builder agent drafts an offer, held at the approval gate
 npm run factory     # value demo: weak producers auto-replaced, KPI uplift scorecard
 npm run proof       # human-readable event log + validation
