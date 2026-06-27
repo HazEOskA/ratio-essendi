@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { evaluateAgent } from "@ratio-essendi/evaluation-engine"
 import { getLog, clearLog } from "@ratio-essendi/event-log"
 
-test("evaluateAgent passes when the output evidences its KPIs", () => {
+test("evaluateAgent passes and emits agent.output_evaluated when score >= 0.5", () => {
   clearLog()
   const result = evaluateAgent(
     "agent-x",
@@ -15,6 +15,8 @@ test("evaluateAgent passes when the output evidences its KPIs", () => {
   assert.ok(result.score >= 0.5, `score was ${result.score}`)
   assert.deepEqual(result.failureReasons, [])
   assert.equal(typeof result.timestamp, "string")
+
+  assert.equal(getLog().filter((e) => e.eventType === "agent.output_evaluated").length, 1)
   assert.equal(getLog().filter((e) => e.eventType === "agent.failure_detected").length, 0)
 })
 

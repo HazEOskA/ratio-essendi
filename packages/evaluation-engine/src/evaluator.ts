@@ -1,4 +1,4 @@
-import type { SystemEvent } from "@ratio-essendi/shared"
+import type { AgentContract, SystemEvent } from "@ratio-essendi/shared"
 import { newId, nowIso } from "@ratio-essendi/shared"
 import { appendEvent } from "@ratio-essendi/event-log"
 
@@ -15,14 +15,14 @@ const PASS_THRESHOLD = 0.5
 /**
  * Evaluate an agent's output against its KPIs (docs/09, docs/14).
  *
- * Score is the fraction of KPIs evidenced in the output. A score below the
- * pass threshold emits an `agent.failure_detected` event to the shared log —
- * every failure carries a reason (docs/14 validation).
+ * Score is the fraction of KPIs evidenced in the output. Either way the result
+ * is logged: a pass emits `agent.output_evaluated`, a fail emits
+ * `agent.failure_detected` — and every failure carries a reason (docs/14).
  */
 export function evaluateAgent(
   agentId: string,
   output: string,
-  kpis: string[],
+  kpis: AgentContract["kpis"],
 ): EvaluationResult {
   const haystack = output.toLowerCase()
   const failureReasons: string[] = []
@@ -39,7 +39,18 @@ export function evaluateAgent(
   const passed = score >= PASS_THRESHOLD
   const timestamp = nowIso()
 
-  if (score < PASS_THRESHOLD) {
+  if (passed) {
+    const event: SystemEvent = {
+      id: newId("evt"),
+      eventType: "agent.output_evaluated",
+      entityId: agentId,
+      entityType: "agent",
+      nextState: "active",
+      reason: `Agent ${agentId} scored ${score} (>= ${PASS_THRESHOLD}).`,
+      createdAt: timestamp,
+    }
+    appendEvent(event)
+  } else {
     const event: SystemEvent = {
       id: newId("evt"),
       eventType: "agent.failure_detected",

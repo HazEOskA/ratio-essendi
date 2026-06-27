@@ -13,7 +13,7 @@ export function appendEvent(event: SystemEvent): SystemEvent {
   return event
 }
 
-export function getLog(): readonly SystemEvent[] {
+export function getLog(): SystemEvent[] {
   return events
 }
 
