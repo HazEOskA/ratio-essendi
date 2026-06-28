@@ -7,8 +7,13 @@ import {
   type SystemEvent,
 } from "@ratio-essendi/shared"
 import { MetaGovernor } from "@ratio-essendi/meta-governor"
-import { evaluateAgent } from "@ratio-essendi/evaluation-engine"
+import { evaluateAgent, HeuristicJudge } from "@ratio-essendi/evaluation-engine"
 import { StubOfferProvider, type OfferProvider } from "@ratio-essendi/offer-builder"
+import {
+  HeuristicQualifier,
+  runProspectAgent,
+  PROSPECT_POOL,
+} from "@ratio-essendi/prospecting"
 import { buildSnapshot, type LiveState, type PendingOffer } from "@ratio-essendi/dashboard"
 import type { FileStore } from "./store.js"
 
@@ -221,6 +226,66 @@ export class World {
     this.#persist()
   }
 
+  /**
+   * Rank the prospect pool by ICP fit, pick the best uncontacted prospect,
+   * run the qualification + offer pipeline, and surface the result in the
+   * pending queue for operator approval.
+   */
+  async findClient(): Promise<void> {
+    const ICP = "Seed-stage B2B SaaS founders (10-50 employees)"
+    const qualifier = new HeuristicQualifier()
+    const judge = new HeuristicJudge()
+
+    const contactedIds = this.#pending.map((p) => p.agentName?.split("→ ")[1]?.trim()).filter(Boolean)
+    const candidates = PROSPECT_POOL.filter((p) => !contactedIds.includes(p.company))
+
+    if (candidates.length === 0) {
+      this.gov.log.append({
+        eventType: "prospect.pool_exhausted",
+        entityId: this.#cellId,
+        entityType: "system",
+        reason: "All prospects in the pool have been contacted. Add more to continue.",
+      })
+      this.#persist()
+      return
+    }
+
+    const scored = await Promise.all(
+      candidates.map(async (p) => ({ p, q: await qualifier.qualify(p, ICP) })),
+    )
+    scored.sort((a, b) => b.q.fitScore - a.q.fitScore)
+    const best = scored[0]!
+
+    const result = await runProspectAgent(
+      this.gov,
+      this.#cellId,
+      {
+        prospect: best.p,
+        icp: ICP,
+        product: "Fractional RevOps sprint",
+        constraints: ["2-week delivery", "fixed scope"],
+        kpis: KPIS,
+      },
+      qualifier,
+      this.#provider,
+      judge,
+    )
+
+    if (result.status === "pending_approval" && result.offer) {
+      this.#pending.push({
+        id: `po-${this.#pending.length + 1}`,
+        agentId: result.agentId,
+        agentName: `Prospector → ${best.p.company}`,
+        offer: result.offer,
+        score: result.offerScore ?? 0,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      })
+    }
+
+    this.#persist()
+  }
+
   async action(action: string, id: string): Promise<void> {
     switch (action) {
       case "approve":
@@ -243,6 +308,9 @@ export class World {
         break
       case "tick":
         await this.tick()
+        break
+      case "findClient":
+        await this.findClient()
         break
     }
   }

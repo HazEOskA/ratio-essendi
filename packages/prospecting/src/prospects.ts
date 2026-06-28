@@ -1,0 +1,55 @@
+import type { ProspectProfile } from "./types.js"
+
+/** Sample prospect pool. In production this would come from a CRM or inbound form. */
+export const PROSPECT_POOL: ProspectProfile[] = [
+  {
+    id: "prospect-001",
+    name: "Marta Wiśniewska",
+    company: "PipelineOS",
+    role: "Co-Founder & CEO",
+    companySize: "10-50",
+    industry: "B2B SaaS",
+    painPoints: ["sales pipeline is manual", "no RevOps process", "losing deals to slower follow-up"],
+    notes: "Raised seed round 6 months ago, now scaling sales motion.",
+  },
+  {
+    id: "prospect-002",
+    name: "Carlos Reyes",
+    company: "Stackly",
+    role: "Founder",
+    companySize: "15-40",
+    industry: "SaaS / dev tooling",
+    painPoints: ["revenue forecasting is guesswork", "churn is rising", "no sales ops playbook"],
+    notes: "Technical founder, first sales hire failed, looking for fractional help.",
+  },
+  {
+    id: "prospect-003",
+    name: "Diana Hoffmann",
+    company: "MegaCorp Manufacturing",
+    role: "VP Procurement",
+    companySize: "5000+",
+    industry: "Industrial manufacturing",
+    painPoints: ["supplier lead times", "logistics costs"],
+    notes: "Enterprise buyer, procurement focus, not a startup.",
+  },
+  {
+    id: "prospect-004",
+    name: "Jan Kowalski",
+    company: "Clarix",
+    role: "CEO",
+    companySize: "20-35",
+    industry: "B2B SaaS / HR tech",
+    painPoints: ["outbound is not converting", "quota attainment below 60%", "sales cycle too long"],
+    notes: "Second-time founder, Series A prep, needs revenue operations.",
+  },
+  {
+    id: "prospect-005",
+    name: "Fatima El-Amin",
+    company: "BrandBoost Agency",
+    role: "Managing Director",
+    companySize: "8-12",
+    industry: "Marketing agency",
+    painPoints: ["client retention", "proposal win rate"],
+    notes: "Agency, not a SaaS company — outside ICP.",
+  },
+]

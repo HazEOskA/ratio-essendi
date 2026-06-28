@@ -63,6 +63,7 @@ export function renderLiveShell(): string {
       <p class="sub">Live view · operator controls · <span id="paused" class="pill">…</span></p>
     </div>
     <div class="toolbar">
+      <button class="tbtn" id="btn-findclient">Find Client</button>
       <button class="tbtn" id="btn-tick">Tick now</button>
       <button class="tbtn" id="btn-pause">Pause sim</button>
       <button class="tbtn" id="btn-resume">Resume sim</button>
@@ -149,6 +150,7 @@ export function renderLiveShell(): string {
     var t = e.target;
     if (t && t.getAttribute) { var a = t.getAttribute('data-act'); if (a) { act(a, t.getAttribute('data-id') || ''); } }
   });
+  document.getElementById('btn-findclient').addEventListener('click', function(){ act('findClient',''); });
   document.getElementById('btn-report').addEventListener('click', genReport);
   document.getElementById('btn-pause').addEventListener('click', function(){ act('pause',''); });
   document.getElementById('btn-resume').addEventListener('click', function(){ act('resume',''); });
