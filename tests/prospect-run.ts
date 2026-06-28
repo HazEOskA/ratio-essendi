@@ -1,6 +1,6 @@
 import { MetaGovernor } from "@ratio-essendi/meta-governor"
-import { StubOfferProvider } from "@ratio-essendi/offer-builder"
-import { HeuristicJudge } from "@ratio-essendi/evaluation-engine"
+import { selectOfferProvider } from "@ratio-essendi/offer-builder"
+import { selectJudge } from "@ratio-essendi/evaluation-engine"
 import {
   HeuristicQualifier,
   runProspectAgent,
@@ -23,12 +23,21 @@ const cell = gov.registerCell({
 
 const qualifier = new HeuristicQualifier()
 
+const { provider, mode: offerMode } = selectOfferProvider()
+const { judge, mode: judgeMode } = selectJudge()
+
 console.log("═══════════════════════════════════════════════")
 console.log("  RATIO ESSENDI — Prospect Qualification Run   ")
 console.log("═══════════════════════════════════════════════\n")
 console.log(`ICP:     ${ICP}`)
-console.log(`Product: ${PRODUCT}\n`)
-console.log(`Scoring ${PROSPECT_POOL.length} prospects…\n`)
+console.log(`Product: ${PRODUCT}`)
+console.log(
+  `Provider: ${offerMode === "anthropic" ? "Anthropic claude-opus-4-8 (LIVE)" : "stub (offline)"}`,
+)
+console.log(
+  `Judge:    ${judgeMode === "anthropic" ? "Anthropic claude-opus-4-8 (LIVE)" : "heuristic (offline)"}`,
+)
+console.log(`\nScoring ${PROSPECT_POOL.length} prospects…\n`)
 
 const scored = await Promise.all(
   PROSPECT_POOL.map(async (p) => ({ p, q: await qualifier.qualify(p, ICP) })),
@@ -54,9 +63,6 @@ const best = qualified[0]!
 console.log(`Best match: ${best.p.name} at ${best.p.company} (fit ${(best.q.fitScore * 100).toFixed(0)}%)`)
 console.log(`Notes: ${best.p.notes ?? "—"}\n`)
 console.log("Running offer pipeline…\n")
-
-const provider = new StubOfferProvider()
-const judge = new HeuristicJudge()
 
 const result = await runProspectAgent(
   gov,

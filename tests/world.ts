@@ -7,8 +7,8 @@ import {
   type SystemEvent,
 } from "@ratio-essendi/shared"
 import { MetaGovernor } from "@ratio-essendi/meta-governor"
-import { evaluateAgent, HeuristicJudge } from "@ratio-essendi/evaluation-engine"
-import { StubOfferProvider, type OfferProvider } from "@ratio-essendi/offer-builder"
+import { evaluateAgent, selectJudge } from "@ratio-essendi/evaluation-engine"
+import { selectOfferProvider, type OfferProvider } from "@ratio-essendi/offer-builder"
 import {
   HeuristicQualifier,
   runProspectAgent,
@@ -54,7 +54,7 @@ export class World {
   #seq = 0
 
   constructor(opts: WorldOptions = {}) {
-    this.#provider = opts.provider ?? new StubOfferProvider()
+    this.#provider = opts.provider ?? selectOfferProvider().provider
     this.#store = opts.store
 
     if (opts.snapshot) {
@@ -234,7 +234,7 @@ export class World {
   async findClient(): Promise<void> {
     const ICP = "Seed-stage B2B SaaS founders (10-50 employees)"
     const qualifier = new HeuristicQualifier()
-    const judge = new HeuristicJudge()
+    const { judge } = selectJudge()
 
     const contactedIds = this.#pending.map((p) => p.agentName?.split("→ ")[1]?.trim()).filter(Boolean)
     const candidates = PROSPECT_POOL.filter((p) => !contactedIds.includes(p.company))
