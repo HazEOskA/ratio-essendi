@@ -44,6 +44,8 @@ export type WorldOptions = {
  * server restart. Determinism is preserved by restoring the id counters and the
  * sim sequence, not just the data.
  */
+const MAX_PENDING = Number(process.env["MAX_PENDING"] ?? 5)
+
 export class World {
   readonly gov = new MetaGovernor()
   #cellId: string
@@ -125,6 +127,7 @@ export class World {
   }
 
   async spawnOffer(): Promise<void> {
+    if (this.#pending.filter((p) => p.status === "pending").length >= MAX_PENDING) return
     this.#seq += 1
     const agent = this.#register(`Offer Builder ${this.#seq}`)
     const offer = await this.#provider.generateOffer({
@@ -232,6 +235,7 @@ export class World {
    * pending queue for operator approval.
    */
   async findClient(): Promise<void> {
+    if (this.#pending.filter((p) => p.status === "pending").length >= MAX_PENDING) return
     const ICP = "Seed-stage B2B SaaS founders (10-50 employees)"
     const qualifier = new HeuristicQualifier()
     const { judge } = selectJudge()
