@@ -43,3 +43,15 @@ System cells require failover logic and shadow replacement path.
 ## Decision 011 — No Single Point of Failure
 
 No agent, model, cell or dashboard can become the only point of failure.
+
+## Decision 012 — Factory Metaphor Is Conceptual For Now
+
+The factory/company metaphor (hall, production line, machine, pallet, warehouse, mechanic, technologist, quality control, BHP, dispatch, 5S) is accepted as a documentation and communication layer only. No runtime abstractions are created from it in v0.1. The metaphor gives the system two vocabularies — one for engineers, one for operators — without changing the architecture. See docs/17.
+
+## Decision 013 — Commercial Growth Factory Starts As Sandbox Target
+
+The Commercial Growth Factory (market signal → lead → compliance → qualification → offer → approval → client communication → value tracking) is accepted as the target architecture for future revenue operations. It is not the current runtime. Implementation begins in sandbox, starts with offline stubs, and every external action requires human approval. No automatic outreach, no automatic ad spend, no untraced leads. See docs/19.
+
+## Decision 014 — Shift Calendar Is Operating Rhythm, Not Scheduler
+
+The three-shift / weekday-weekend cadence is accepted as a human operating rhythm. The system does not implement it as a scheduler, does not activate or deactivate agents by time of day, and does not shut down automatically on weekends. The calendar is a discipline for the operator: produce on weekdays, reflect and review on weekends. See docs/18.
