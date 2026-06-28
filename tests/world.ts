@@ -160,7 +160,6 @@ export class World {
   }
 
   injectDrift(): void {
-    this.#seq += 1
     const agent = this.#register(`Drifter ${this.#seq}`)
     const result = evaluateAgent(agent.id, "off-topic blast, no targeting, generic spam", KPIS, this.gov.log)
     if (!result.passed) {
@@ -177,8 +176,10 @@ export class World {
 
   async tick(): Promise<void> {
     if (this.#paused) return
-    if (this.#seq % 3 === 2) this.injectDrift()
-    else await this.spawnOffer()
+    this.#seq += 1
+    // Auto-tick = drift simulation only. Offers are triggered by the operator
+    // ("Tick now" or "Find Client"), not by the background timer.
+    if (this.#seq % 4 === 0) this.injectDrift()
   }
 
   approve(offerId: string): void {
@@ -311,7 +312,7 @@ export class World {
         this.setPaused(false)
         break
       case "tick":
-        await this.tick()
+        await this.spawnOffer()
         break
       case "findClient":
         await this.findClient()
