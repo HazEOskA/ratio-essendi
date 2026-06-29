@@ -1,6 +1,18 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs"
 import { join, dirname } from "node:path"
-import type { FactoryState, Signal, QualifiedLead, ApprovalItem, WarehouseItem, TrashItem, FactoryEvent } from "./types.js"
+import type {
+  FactoryState,
+  Signal,
+  QualifiedLead,
+  ApprovalItem,
+  WarehouseItem,
+  TrashItem,
+  FactoryEvent,
+  DailyDigital,
+  DailyDigitalDepartment,
+  DailyMission,
+  FeedbackEvent,
+} from "./types.js"
 
 export class JsonStore<T> {
   readonly #path: string
@@ -41,6 +53,9 @@ export class FactoryStore {
   readonly #warehouse: JsonStore<WarehouseItem[]>
   readonly #trash: JsonStore<TrashItem[]>
   readonly #events: JsonStore<FactoryEvent[]>
+  readonly #dailyDigitals: JsonStore<DailyDigital[]>
+  readonly #dailyMissions: JsonStore<DailyMission[]>
+  readonly #feedbackEvents: JsonStore<FeedbackEvent[]>
 
   constructor(dataDir: string) {
     const p = (name: string) => join(dataDir, `${name}.json`)
@@ -50,6 +65,9 @@ export class FactoryStore {
     this.#warehouse = new JsonStore(p("warehouse"), [])
     this.#trash = new JsonStore(p("trash"), [])
     this.#events = new JsonStore(p("events"), [])
+    this.#dailyDigitals = new JsonStore(p("daily-digitals"), [])
+    this.#dailyMissions = new JsonStore(p("daily-missions"), [])
+    this.#feedbackEvents = new JsonStore(p("feedback-events"), [])
   }
 
   snapshot(): FactoryState {
@@ -60,8 +78,13 @@ export class FactoryStore {
       warehouse: this.#warehouse.read(),
       trash: this.#trash.read(),
       events: this.#events.read(),
+      dailyDigitals: this.#dailyDigitals.read(),
+      dailyMissions: this.#dailyMissions.read(),
+      feedbackEvents: this.#feedbackEvents.read(),
     }
   }
+
+  // --- Pipeline ---
 
   addSignal(s: Signal): void {
     this.#signals.update((arr) => [...arr, s])
@@ -97,5 +120,55 @@ export class FactoryStore {
 
   getApprovalItem(id: string): ApprovalItem | undefined {
     return this.#approval.read().find((a) => a.id === id)
+  }
+
+  // --- Daily Missions ---
+
+  addDailyDigital(d: DailyDigital): void {
+    this.#dailyDigitals.update((arr) => [...arr, d])
+  }
+
+  updateDailyDigital(id: string, patch: Partial<DailyDigital>): void {
+    this.#dailyDigitals.update((arr) => arr.map((d) => (d.id === id ? { ...d, ...patch } : d)))
+  }
+
+  getDailyDigital(id: string): DailyDigital | undefined {
+    return this.#dailyDigitals.read().find((d) => d.id === id)
+  }
+
+  getDailyDigitalsForDate(date: string): DailyDigital[] {
+    return this.#dailyDigitals.read().filter((d) => d.date === date)
+  }
+
+  addDailyMission(m: DailyMission): void {
+    this.#dailyMissions.update((arr) => [...arr, m])
+  }
+
+  addFeedbackEvent(e: FeedbackEvent): void {
+    this.#feedbackEvents.update((arr) => [...arr, e])
+  }
+
+  /** Returns recent operator feedback text grouped by department, from needs_rework and rejected items. */
+  getRecentFeedbackConstraints(days: number): Record<DailyDigitalDepartment, string[]> {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString()
+    const result: Record<DailyDigitalDepartment, string[]> = {
+      marketing: [],
+      sales: [],
+      delivery: [],
+      research: [],
+      qa: [],
+    }
+    const events = this.#feedbackEvents
+      .read()
+      .filter(
+        (e) =>
+          e.timestamp >= cutoff &&
+          e.feedback &&
+          (e.action === "needs_rework" || e.action === "rejected"),
+      )
+    for (const ev of events) {
+      if (ev.feedback) result[ev.department].push(ev.feedback)
+    }
+    return result
   }
 }

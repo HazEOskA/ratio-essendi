@@ -2,21 +2,32 @@
  * Factory Core v0.1 — Operator Dashboard (port 7778)
  *
  * Pages:
- *   GET /          → /factory  — pipeline overview + signal input form
- *   GET /leads     → qualified leads
- *   GET /warehouse → approved offers
- *   GET /trash     → rejected / failed items
- *   GET /events    → full event log
+ *   GET /              → /factory       — pipeline overview + signal input form
+ *   GET /leads         → qualified leads
+ *   GET /warehouse     → approved offers
+ *   GET /trash         → rejected / failed items
+ *   GET /events        → full event log
+ *   GET /daily-review  → NO_CLIENT_TRAINING_MODE daily production review
  *
  * API:
  *   POST /api/signal  { raw: string }                   → run pipeline
  *   POST /api/action  { action: string, id: string }    → approve / reject
+ *   POST /api/daily   { action, id?, feedback?, date? } → daily mission actions
  */
 import { createServer } from "node:http"
 import { join } from "node:path"
 import { mkdirSync, existsSync } from "node:fs"
-import { FactoryStore, runOfferAcquisitionForSignal, agentI } from "@ratio-essendi/factory-core"
-import type { FactoryState, PipelineResult } from "@ratio-essendi/factory-core"
+import {
+  FactoryStore,
+  runOfferAcquisitionForSignal,
+  agentI,
+  runDailyMissions,
+  acceptDigital,
+  reworkDigital,
+  rejectDigital,
+  warehouseDigital,
+} from "@ratio-essendi/factory-core"
+import type { FactoryState, PipelineResult, DailyDigital } from "@ratio-essendi/factory-core"
 
 const PORT = 7778
 const DATA_DIR = join(process.cwd(), ".factory-data")
@@ -39,6 +50,7 @@ const nav = (active: string): string => {
     ["/warehouse", "Warehouse"],
     ["/trash", "Trash"],
     ["/events", "Events"],
+    ["/daily-review", "Daily Review"],
   ]
   return `<nav class="nav">${links.map(([href, label]) => `<a href="${href}" class="${active === href ? "active" : ""}">${label}</a>`).join("")}</nav>`
 }
@@ -89,6 +101,19 @@ button.bad{background:#3a1418;color:#f85149;border-color:#5a1e23}
 .flash.bad{background:#3a1418;border-color:#5a1e23;color:#f85149}
 .agents-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:16px}
 .agent-card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:10px 12px}
+.daily-card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px;margin-bottom:14px}
+.daily-card.draft{border-left:3px solid #58a6ff}
+.daily-card.accepted{border-left:3px solid #3fb950}
+.daily-card.needs_rework{border-left:3px solid #d29922}
+.daily-card.rejected{border-left:3px solid #f85149}
+.daily-card.archived{border-left:3px solid #8b949e}
+.daily-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.daily-title{font-weight:600;font-size:14px}
+.daily-content{white-space:pre-wrap;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px;font-size:12px;color:#c9d1d9;max-height:320px;overflow-y:auto;margin:8px 0 10px}
+.daily-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start}
+.feedback-area{display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px}
+.score-bar{display:inline-block;width:60px;height:6px;border-radius:3px;background:#21262d;vertical-align:middle;margin-left:4px;overflow:hidden}
+.score-fill{height:100%;border-radius:3px}
 .agent-card .aid{font-weight:700;font-size:15px;color:#58a6ff;margin-right:6px}
 .agent-card .aname{font-weight:600;font-size:13px}
 .agent-card .arole{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
@@ -227,6 +252,146 @@ ${state.trash.map((t) => `<tr>
 </table>`}`)
 }
 
+function renderDailyReview(state: FactoryState, flash?: string): string {
+  const today = new Date().toISOString().slice(0, 10)
+  const todayItems = state.dailyDigitals.filter((d) => d.date === today)
+  const pending = todayItems.filter((d) => d.status === "draft_ready" || d.status === "needs_rework")
+  const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
+
+  const statusBadgeCls = (s: string): string => {
+    if (s === "accepted") return "ok"
+    if (s === "needs_rework") return "warn"
+    if (s === "rejected") return "bad"
+    if (s === "draft_ready") return "info"
+    return "muted"
+  }
+
+  const deptBadgeCls = (d: string): string => {
+    const m: Record<string, string> = { marketing: "info", sales: "ok", delivery: "warn", research: "muted", qa: "bad" }
+    return m[d] ?? "muted"
+  }
+
+  const scoreColor = (s: number): string => s >= 0.75 ? "#3fb950" : s >= 0.5 ? "#d29922" : "#f85149"
+
+  const renderCard = (item: DailyDigital): string => {
+    const isActionable = item.status === "draft_ready" || item.status === "needs_rework"
+    const scoreBar = `<span class="score-bar"><span class="score-fill" style="width:${Math.round(item.qualityScore * 100)}%;background:${scoreColor(item.qualityScore)}"></span></span>`
+    const feedbackNote = item.operatorFeedback
+      ? `<div style="font-size:12px;color:#d29922;margin-top:4px">Feedback: ${E(item.operatorFeedback)}</div>`
+      : ""
+    const revNote = item.revisionCount > 0 ? `<span class="dim" style="font-size:11px">rev ${item.revisionCount}</span>` : ""
+
+    const actions = isActionable ? `
+<div class="daily-actions">
+  <form method="POST" action="/api/daily" style="display:flex;gap:6px">
+    <input type="hidden" name="action" value="accept">
+    <input type="hidden" name="id" value="${E(item.id)}">
+    <button class="ok" type="submit">Accept</button>
+  </form>
+  <form method="POST" action="/api/daily" style="display:flex;gap:6px;align-items:flex-start">
+    <input type="hidden" name="action" value="warehouse">
+    <input type="hidden" name="id" value="${E(item.id)}">
+    <button type="submit" style="background:#0f2740;color:#58a6ff;border-color:#1c3a5e">→ Warehouse</button>
+  </form>
+  <div class="feedback-area">
+    <form method="POST" action="/api/daily" style="display:flex;flex-direction:column;gap:4px">
+      <input type="hidden" name="action" value="rework">
+      <input type="hidden" name="id" value="${E(item.id)}">
+      <input name="feedback" placeholder="Feedback for rework..." style="background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font:12px ui-sans-serif,sans-serif;padding:4px 8px" required>
+      <button class="warn" type="submit" style="align-self:flex-start">Needs Rework</button>
+    </form>
+  </div>
+  <div class="feedback-area">
+    <form method="POST" action="/api/daily" style="display:flex;flex-direction:column;gap:4px">
+      <input type="hidden" name="action" value="reject">
+      <input type="hidden" name="id" value="${E(item.id)}">
+      <input name="feedback" placeholder="Reason for rejection..." style="background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font:12px ui-sans-serif,sans-serif;padding:4px 8px" required>
+      <button class="bad" type="submit" style="align-self:flex-start">Reject to Trash</button>
+    </form>
+  </div>
+</div>` : `<div class="dim" style="font-size:12px">Status: ${E(item.status)}${item.location === "warehouse" ? " · in warehouse" : ""}</div>`
+
+    return `<div class="daily-card ${item.status === "draft_ready" ? "draft" : item.status}">
+  <div class="daily-header">
+    ${badge(item.department, deptBadgeCls(item.department))}
+    ${badge(item.status, statusBadgeCls(item.status))}
+    <span class="daily-title">${E(item.title)}</span>
+    ${revNote}
+    <span class="dim" style="font-size:11px">score ${item.qualityScore}${scoreBar}</span>
+    <span class="dim" style="font-size:11px">${E(item.type)}</span>
+  </div>
+  ${feedbackNote}
+  <div class="daily-content">${E(item.content)}</div>
+  ${actions}
+</div>`
+  }
+
+  // All history (older dates) collapsed
+  const olderItems = state.dailyDigitals.filter((d) => d.date !== today)
+  const olderDates = [...new Set(olderItems.map((d) => d.date))].sort().reverse()
+
+  return layout("Daily Review", "/daily-review", `
+<h1>Daily Review — NO_CLIENT_TRAINING_MODE</h1>
+<p class="sub">5 digital deliverables per day · operator reviews each · feedback influences next run</p>
+${flashHtml}
+
+<div class="stats">
+  <div class="stat"><div class="v info">${todayItems.length}</div><div class="l">Today</div></div>
+  <div class="stat"><div class="v ${pending.length ? "warn" : "ok"}">${pending.length}</div><div class="l">Pending Review</div></div>
+  <div class="stat"><div class="v ok">${state.dailyDigitals.filter((d) => d.status === "accepted").length}</div><div class="l">Accepted</div></div>
+  <div class="stat"><div class="v ok">${state.dailyDigitals.filter((d) => d.location === "warehouse").length}</div><div class="l">In Warehouse</div></div>
+  <div class="stat"><div class="v bad">${state.dailyDigitals.filter((d) => d.status === "rejected").length}</div><div class="l">Rejected</div></div>
+  <div class="stat"><div class="v muted">${state.feedbackEvents.length}</div><div class="l">Feedback Events</div></div>
+</div>
+
+${todayItems.length === 0 ? `
+<div class="form-card">
+  <p style="margin-bottom:10px;color:#8b949e">No missions run for today (${today}).</p>
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="action" value="run">
+    <input type="hidden" name="date" value="${today}">
+    <button type="submit">Run Today's 5 Missions →</button>
+  </form>
+</div>` : `
+<h2>Today — ${today} (${todayItems.length} deliverables)</h2>
+${todayItems.map(renderCard).join("")}
+`}
+
+${olderDates.length > 0 ? `
+<h2>Previous Days</h2>
+<table>
+<thead><tr><th>Date</th><th>Department</th><th>Title</th><th>Status</th><th>Score</th><th>Location</th></tr></thead>
+<tbody>
+${olderDates.flatMap((date) =>
+  olderItems
+    .filter((d) => d.date === date)
+    .map((d) => `<tr>
+  <td class="dim">${E(d.date)}</td>
+  <td>${badge(d.department, "muted")}</td>
+  <td>${E(d.title)}</td>
+  <td>${badge(d.status, d.status === "accepted" ? "ok" : d.status === "rejected" ? "bad" : "warn")}</td>
+  <td class="mono">${d.qualityScore}</td>
+  <td class="dim">${E(d.location)}</td>
+</tr>`)
+).join("")}
+</tbody>
+</table>` : ""}
+
+${state.feedbackEvents.length > 0 ? `
+<h2>Feedback Events — Constraints for Next Run</h2>
+<table>
+<thead><tr><th>Time</th><th>Dept</th><th>Action</th><th>Feedback</th></tr></thead>
+<tbody>
+${[...state.feedbackEvents].reverse().slice(0, 20).map((e) => `<tr>
+  <td class="mono dim">${E(e.timestamp.slice(0, 16).replace("T", " "))}</td>
+  <td>${badge(e.department, "muted")}</td>
+  <td>${badge(e.action, e.action === "accepted" || e.action === "warehoused" ? "ok" : e.action === "needs_rework" ? "warn" : "bad")}</td>
+  <td class="dim" style="font-size:12px">${E(e.feedback ?? "—")}</td>
+</tr>`).join("")}
+</tbody>
+</table>` : ""}`)
+}
+
 function renderEvents(state: FactoryState): string {
   const events = [...state.events].reverse()
   return layout("Events", "/events", `
@@ -304,6 +469,7 @@ const server = createServer(async (req, res) => {
       if (url === "/warehouse") return html(res, renderWarehouse(state))
       if (url === "/trash") return html(res, renderTrash(state))
       if (url === "/events") return html(res, renderEvents(state))
+      if (url === "/daily-review") return html(res, renderDailyReview(state))
       return html(res, "<h1>404</h1>", 404)
     }
 
@@ -375,6 +541,40 @@ const server = createServer(async (req, res) => {
       return redirect(res, "/")
     }
 
+    if (method === "POST" && url === "/api/daily") {
+      const params = await readBody(req)
+      const action = params["action"] ?? ""
+      const id = params["id"] ?? ""
+      const feedback = (params["feedback"] ?? "").trim()
+      const date = params["date"] ?? new Date().toISOString().slice(0, 10)
+
+      if (action === "run") {
+        try {
+          await runDailyMissions(store, date)
+          return html(res, renderDailyReview(store.snapshot(), `5 missions run for ${date}`))
+        } catch (err) {
+          return html(res, renderDailyReview(store.snapshot(), `Error: ${String(err)}`))
+        }
+      }
+      if (action === "accept" && id) {
+        acceptDigital(store, id)
+        return html(res, renderDailyReview(store.snapshot(), "Accepted."))
+      }
+      if (action === "rework" && id && feedback) {
+        reworkDigital(store, id, feedback)
+        return html(res, renderDailyReview(store.snapshot(), `Marked for rework — feedback stored for next run.`))
+      }
+      if (action === "reject" && id && feedback) {
+        rejectDigital(store, id, feedback)
+        return html(res, renderDailyReview(store.snapshot(), "Rejected and moved to trash."))
+      }
+      if (action === "warehouse" && id) {
+        warehouseDigital(store, id)
+        return html(res, renderDailyReview(store.snapshot(), "Sent to Warehouse."))
+      }
+      return html(res, renderDailyReview(store.snapshot(), "Error: unknown action or missing id/feedback."))
+    }
+
     html(res, "<h1>404</h1>", 404)
   } catch (err) {
     console.error(err)
@@ -389,5 +589,6 @@ server.listen(PORT, () => {
   console.log("  /warehouse     — approved offers")
   console.log("  /trash         — disqualified / failed")
   console.log("  /events        — full event log")
+  console.log("  /daily-review  — NO_CLIENT_TRAINING_MODE daily review")
   console.log("\nPress Ctrl+C to stop.\n")
 })

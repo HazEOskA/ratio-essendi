@@ -1,4 +1,9 @@
-export type AgentId = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N"
+// A–N = Offer Acquisition Line agents; MA/SA/DA/RA/QAA = Daily Mission agents
+export type AgentId =
+  | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N"
+  | "MA" | "SA" | "DA" | "RA" | "QAA"
+
+export type MissionAgentId = "MA" | "SA" | "DA" | "RA" | "QAA"
 
 // --- Pipeline data types ---
 
@@ -133,6 +138,50 @@ export type PipelineResult = {
   events: FactoryEvent[]
 }
 
+// --- Daily Mission types ---
+
+export type DailyDigitalStatus = "draft_ready" | "accepted" | "needs_rework" | "rejected" | "archived"
+export type DailyDigitalLocation = "daily_review" | "warehouse" | "trash"
+export type DailyDigitalDepartment = "marketing" | "sales" | "delivery" | "research" | "qa"
+
+export type DailyDigital = {
+  id: string
+  date: string
+  title: string
+  department: DailyDigitalDepartment
+  type: string
+  content: string
+  status: DailyDigitalStatus
+  qualityScore: number
+  createdByAgentId: MissionAgentId
+  linkedMissionId: string
+  operatorFeedback?: string
+  revisionCount: number
+  createdAt: string
+  updatedAt: string
+  location: DailyDigitalLocation
+}
+
+export type DailyMission = {
+  id: string
+  date: string
+  department: DailyDigitalDepartment
+  taskType: string
+  constraints: string[]
+  status: "pending" | "complete" | "failed"
+  outputId?: string
+}
+
+export type FeedbackEvent = {
+  id: string
+  timestamp: string
+  digitalId: string
+  department: DailyDigitalDepartment
+  action: "accepted" | "needs_rework" | "rejected" | "warehoused"
+  feedback?: string
+  nextRevisionTaskId?: string
+}
+
 // --- Full factory state snapshot ---
 
 export type FactoryState = {
@@ -142,4 +191,7 @@ export type FactoryState = {
   warehouse: WarehouseItem[]
   trash: TrashItem[]
   events: FactoryEvent[]
+  dailyDigitals: DailyDigital[]
+  dailyMissions: DailyMission[]
+  feedbackEvents: FeedbackEvent[]
 }

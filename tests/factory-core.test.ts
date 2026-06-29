@@ -17,6 +17,11 @@ import {
   agentG,
   agentH,
   agentI,
+  runDailyMissions,
+  acceptDigital,
+  reworkDigital,
+  rejectDigital,
+  warehouseDigital,
 } from "@ratio-essendi/factory-core"
 import type { Signal, QualifiedLead, ScoredOffer } from "@ratio-essendi/factory-core"
 
@@ -247,6 +252,196 @@ test("pipeline: two different signals produce two independent approval items", a
     assert.ok(pending.length >= 1, `Expected at least 1 pending approval, got ${pending.length}`)
     const ids = pending.map((a) => a.id)
     assert.equal(new Set(ids).size, ids.length, "approval IDs must be unique")
+  } finally {
+    cleanup()
+  }
+})
+
+// 4. Daily Mission tests
+
+test("runDailyMissions: creates exactly 5 deliverables", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const digitals = await runDailyMissions(store, "2026-06-29")
+    assert.equal(digitals.length, 5, `Expected 5, got ${digitals.length}`)
+  } finally {
+    cleanup()
+  }
+})
+
+test("runDailyMissions: one deliverable per department", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const digitals = await runDailyMissions(store, "2026-06-29")
+    const depts = digitals.map((d) => d.department)
+    for (const d of ["marketing", "sales", "delivery", "research", "qa"] as const) {
+      assert.ok(depts.includes(d), `Missing department: ${d}`)
+    }
+    assert.equal(new Set(depts).size, 5, "departments must be unique")
+  } finally {
+    cleanup()
+  }
+})
+
+test("runDailyMissions: all deliverables start as draft_ready in daily_review", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const digitals = await runDailyMissions(store, "2026-06-29")
+    for (const d of digitals) {
+      assert.equal(d.status, "draft_ready", `${d.department} status: ${d.status}`)
+      assert.equal(d.location, "daily_review", `${d.department} location: ${d.location}`)
+    }
+  } finally {
+    cleanup()
+  }
+})
+
+test("runDailyMissions: every deliverable has real content (not empty, not placeholder-only)", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const digitals = await runDailyMissions(store, "2026-06-29")
+    for (const d of digitals) {
+      assert.ok(d.content.length >= 400, `${d.department} content too short: ${d.content.length}`)
+      assert.ok(d.title.length > 0, `${d.department} has empty title`)
+      assert.ok(d.qualityScore > 0, `${d.department} has zero quality score`)
+      assert.ok(/\d/.test(d.content), `${d.department} content has no numbers — too generic`)
+    }
+  } finally {
+    cleanup()
+  }
+})
+
+test("runDailyMissions: idempotent — second call for same date returns same 5 items", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const first = await runDailyMissions(store, "2026-06-29")
+    const second = await runDailyMissions(store, "2026-06-29")
+    assert.equal(second.length, 5)
+    assert.deepEqual(
+      first.map((d) => d.id),
+      second.map((d) => d.id),
+    )
+  } finally {
+    cleanup()
+  }
+})
+
+test("runDailyMissions: different date produces different IDs and titles", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const day1 = await runDailyMissions(store, "2026-06-29")
+    const day2 = await runDailyMissions(store, "2026-07-03")
+    // IDs embed the date, so they must be different
+    assert.notDeepEqual(
+      day1.map((d) => d.id),
+      day2.map((d) => d.id),
+      "items for different dates must have different IDs",
+    )
+    // Titles include the date, so at least one must differ
+    const titles1 = day1.map((d) => d.title)
+    const titles2 = day2.map((d) => d.title)
+    assert.ok(
+      titles1.some((t, i) => t !== titles2[i]),
+      "at least one title must differ between different run dates",
+    )
+  } finally {
+    cleanup()
+  }
+})
+
+test("acceptDigital: sets status to accepted and logs feedback event", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const digitals = await runDailyMissions(store, "2026-06-29")
+    const mkt = digitals.find((d) => d.department === "marketing")!
+    acceptDigital(store, mkt.id)
+    const updated = store.getDailyDigital(mkt.id)!
+    assert.equal(updated.status, "accepted")
+    const state = store.snapshot()
+    assert.ok(state.feedbackEvents.some((e) => e.digitalId === mkt.id && e.action === "accepted"))
+  } finally {
+    cleanup()
+  }
+})
+
+test("warehouseDigital: moves accepted item to warehouse location", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const digitals = await runDailyMissions(store, "2026-06-29")
+    const sales = digitals.find((d) => d.department === "sales")!
+    warehouseDigital(store, sales.id)
+    const updated = store.getDailyDigital(sales.id)!
+    assert.equal(updated.location, "warehouse")
+    assert.equal(updated.status, "accepted")
+  } finally {
+    cleanup()
+  }
+})
+
+test("rejectDigital: moves item to trash and logs feedback event with reason", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const digitals = await runDailyMissions(store, "2026-06-29")
+    const delivery = digitals.find((d) => d.department === "delivery")!
+    rejectDigital(store, delivery.id, "Too generic, needs specific construction industry examples")
+    const updated = store.getDailyDigital(delivery.id)!
+    assert.equal(updated.status, "rejected")
+    assert.equal(updated.location, "trash")
+    const state = store.snapshot()
+    const fb = state.feedbackEvents.find((e) => e.digitalId === delivery.id)
+    assert.ok(fb, "feedback event must exist")
+    assert.equal(fb!.action, "rejected")
+    assert.ok(fb!.feedback?.includes("construction"), "feedback text must be stored")
+  } finally {
+    cleanup()
+  }
+})
+
+test("reworkDigital: creates feedback event with nextRevisionTaskId and stores feedback", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const digitals = await runDailyMissions(store, "2026-06-29")
+    const research = digitals.find((d) => d.department === "research")!
+    const taskId = reworkDigital(store, research.id, "Too abstract, focus on HR tech niche specifically")
+    assert.ok(taskId.length > 0, "revision task ID must be returned")
+    const updated = store.getDailyDigital(research.id)!
+    assert.equal(updated.status, "needs_rework")
+    assert.equal(updated.operatorFeedback, "Too abstract, focus on HR tech niche specifically")
+    const state = store.snapshot()
+    const fb = state.feedbackEvents.find((e) => e.digitalId === research.id)
+    assert.ok(fb?.nextRevisionTaskId, "nextRevisionTaskId must be set")
+  } finally {
+    cleanup()
+  }
+})
+
+test("feedback loop: next run incorporates rework feedback as constraints", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const day1 = await runDailyMissions(store, "2026-06-28")
+    const mkt = day1.find((d) => d.department === "marketing")!
+    reworkDigital(store, mkt.id, "too generic, focus on construction companies specifically")
+
+    // Next day's missions should have constraints for marketing
+    const day2 = await runDailyMissions(store, "2026-06-30")
+    const mkt2 = day2.find((d) => d.department === "marketing")!
+    // The constraint must appear in the content (constraintHeader is prepended)
+    assert.ok(
+      mkt2.content.includes("too generic") || mkt2.content.includes("OPERATOR FEEDBACK"),
+      "next run must incorporate operator feedback in content",
+    )
+  } finally {
+    cleanup()
+  }
+})
+
+test("all 5 daily events logged to factory event store", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    await runDailyMissions(store, "2026-06-29")
+    const state = store.snapshot()
+    const missionEvents = state.events.filter((e) => e.eventType === "daily.mission_complete")
+    assert.equal(missionEvents.length, 5, `Expected 5 mission events, got ${missionEvents.length}`)
   } finally {
     cleanup()
   }
