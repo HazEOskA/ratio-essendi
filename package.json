@@ -17,6 +17,7 @@
     "prospects": "tsx tests/prospect-run.ts",
     "dashboard": "tsx tests/dashboard-run.ts",
     "dashboard:serve": "tsx tests/dashboard-serve.ts",
+    "factory:serve": "tsx tests/factory-serve.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "keywords": [
