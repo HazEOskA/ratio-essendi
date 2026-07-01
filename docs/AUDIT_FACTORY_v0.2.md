@@ -81,3 +81,36 @@ stops at the operator review gate — the autopilot produces, it never delivers.
 - No external channels, no CRM, no mail, no scraping, no ad spend
 - Every review decision is a logged event
 - Operator approval is the only path out of the factory
+
+## Hardening v0.2.1 (post-validation pass)
+
+Two risks from the validation report are closed; no new features added.
+
+### H-01 — Autopilot pause now survives restarts (was risk #1)
+`autopilotEnabled` persists in `settings.json` via the FactoryStore
+(`getAutopilotEnabled` / `setAutopilotEnabled`, default ON). The server reads it
+at startup and writes through on every toggle. `lastCycleSummary` is
+intentionally runtime-only: it is display-only diagnostics, and a persisted
+value would be stale (and misleading) immediately after a restart.
+Covered by: store-reload test + a real spawn-kill-respawn HTTP test.
+
+### H-02 — Department whitelist on POST /api/order (was risk #4)
+Unknown departments are rejected with `400` and a clean JSON body
+(`{ error, received, allowed }`) before `createOrder` runs — no order record,
+no `order.*` event is written. Covered by HTTP tests against a live server
+in a temp data dir.
+
+Note: the server's `PORT` is now env-overridable (`PORT=<n>`), default
+unchanged (7778). This exists so the HTTP tests can run on a free port; it is
+test infrastructure, not a feature surface.
+
+### Remaining risks (unchanged from validation report)
+- `events.json` grows unbounded; loaded fully into memory at start. Fine at
+  current volume; needs rotation/archival before high-volume use.
+- No lock around `runAutonomousCycle` — safe today because generators are
+  synchronous (Node's single thread prevents interleaving). If generators ever
+  become async (real LLM calls), add a cycle mutex first.
+- Pre-v0.2 digitals lack `taskType`; on rework they regenerate with a random
+  task type (documented fallback in `regenerateDigital`).
+- `JsonStore` is single-process; two servers on one `.factory-data` would
+  clobber each other's writes.

@@ -47,6 +47,9 @@ export class JsonStore<T> {
   }
 }
 
+/** Operator-controlled runtime settings that must survive a restart. */
+type FactorySettings = { autopilotEnabled: boolean }
+
 export class FactoryStore {
   readonly #signals: JsonStore<Signal[]>
   readonly #leads: JsonStore<QualifiedLead[]>
@@ -58,6 +61,7 @@ export class FactoryStore {
   readonly #dailyMissions: JsonStore<DailyMission[]>
   readonly #feedbackEvents: JsonStore<FeedbackEvent[]>
   readonly #orders: JsonStore<ClientOrder[]>
+  readonly #settings: JsonStore<FactorySettings>
 
   constructor(dataDir: string) {
     const p = (name: string) => join(dataDir, `${name}.json`)
@@ -71,6 +75,7 @@ export class FactoryStore {
     this.#dailyMissions = new JsonStore(p("daily-missions"), [])
     this.#feedbackEvents = new JsonStore(p("feedback-events"), [])
     this.#orders = new JsonStore(p("orders"), [])
+    this.#settings = new JsonStore(p("settings"), { autopilotEnabled: true })
   }
 
   snapshot(): FactoryState {
@@ -174,6 +179,16 @@ export class FactoryStore {
   /** Orders the factory still has to produce for (client work in progress). */
   getOpenOrders(): ClientOrder[] {
     return this.#orders.read().filter((o) => o.status === "new" || o.status === "in_production")
+  }
+
+  // --- Settings (survive restarts) ---
+
+  getAutopilotEnabled(): boolean {
+    return this.#settings.read().autopilotEnabled
+  }
+
+  setAutopilotEnabled(value: boolean): void {
+    this.#settings.update((s) => ({ ...s, autopilotEnabled: value }))
   }
 
   /** Returns recent operator feedback text grouped by department, from needs_rework and rejected items. */

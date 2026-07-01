@@ -596,6 +596,25 @@ test("autonomous cycle: executes pending rework with feedback applied and bumps 
   }
 })
 
+// 7. Settings persistence
+
+test("paused autopilot remains paused after store reload (simulated restart)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fc-settings-"))
+  try {
+    const store1 = new FactoryStore(dir)
+    assert.equal(store1.getAutopilotEnabled(), true, "default must be ON")
+    store1.setAutopilotEnabled(false)
+    // New instance on the same data dir = what the server does after restart
+    const store2 = new FactoryStore(dir)
+    assert.equal(store2.getAutopilotEnabled(), false, "pause must survive reload")
+    store2.setAutopilotEnabled(true)
+    const store3 = new FactoryStore(dir)
+    assert.equal(store3.getAutopilotEnabled(), true, "resume must survive reload too")
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test("regenerateDigital: order deliverable rework re-applies client brief and returns order to review", () => {
   const { store, cleanup } = tmpStore()
   try {

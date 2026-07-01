@@ -37,7 +37,8 @@ import type {
 } from "@ratio-essendi/factory-core"
 import { randomUUID } from "node:crypto"
 
-const PORT = 7778
+// PORT is env-overridable so the HTTP test suite can run on a free port.
+const PORT = Number(process.env["PORT"] ?? 7778)
 const DATA_DIR = join(process.cwd(), ".factory-data")
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
 
@@ -45,8 +46,13 @@ const store = new FactoryStore(DATA_DIR)
 
 // Autopilot: bounded autonomous cycle (client orders → reworks → daily training).
 // Everything it produces still stops at the operator review gate.
-let autopilotEnabled = true
+// The enabled flag persists in the store (settings.json) so a paused autopilot
+// stays paused across restarts. lastCycleSummary is display-only diagnostics —
+// intentionally runtime-only, a persisted value would be stale after restart.
+let autopilotEnabled = store.getAutopilotEnabled()
 let lastCycleSummary = "not run yet"
+
+const VALID_DEPARTMENTS: readonly DailyDigitalDepartment[] = ["marketing", "sales", "delivery", "research", "qa"]
 
 // --- HTML helpers ---
 
@@ -754,7 +760,12 @@ const server = createServer(async (req, res) => {
       const clientName = (params["clientName"] ?? "").trim()
       const description = (params["description"] ?? "").trim()
       const contact = (params["contact"] ?? "").trim()
-      const department = (params["department"] ?? "delivery") as DailyDigitalDepartment
+      const departmentRaw = (params["department"] ?? "delivery").trim()
+      // Reject unknown departments before anything is created — no order, no event.
+      if (!(VALID_DEPARTMENTS as readonly string[]).includes(departmentRaw)) {
+        return json(res, { error: "invalid department", received: departmentRaw, allowed: VALID_DEPARTMENTS }, 400)
+      }
+      const department = departmentRaw as DailyDigitalDepartment
       if (!clientName || !description) {
         return html(res, renderOrders(store.snapshot(), "Error: client name and description are required"))
       }
@@ -773,6 +784,7 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && url === "/api/autopilot") {
       const params = await readBody(req)
       autopilotEnabled = params["action"] !== "off"
+      store.setAutopilotEnabled(autopilotEnabled)
       store.addEvent({
         id: randomUUID(),
         timestamp: new Date().toISOString(),
