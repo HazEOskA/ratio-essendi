@@ -21,19 +21,32 @@ import {
   FactoryStore,
   runOfferAcquisitionForSignal,
   agentI,
-  runDailyMissions,
   acceptDigital,
   reworkDigital,
   rejectDigital,
   warehouseDigital,
+  createOrder,
+  runAutonomousCycle,
 } from "@ratio-essendi/factory-core"
-import type { FactoryState, PipelineResult, DailyDigital } from "@ratio-essendi/factory-core"
+import type {
+  FactoryState,
+  PipelineResult,
+  DailyDigital,
+  DailyDigitalDepartment,
+  ClientOrder,
+} from "@ratio-essendi/factory-core"
+import { randomUUID } from "node:crypto"
 
 const PORT = 7778
 const DATA_DIR = join(process.cwd(), ".factory-data")
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
 
 const store = new FactoryStore(DATA_DIR)
+
+// Autopilot: bounded autonomous cycle (client orders → reworks → daily training).
+// Everything it produces still stops at the operator review gate.
+let autopilotEnabled = true
+let lastCycleSummary = "not run yet"
 
 // --- HTML helpers ---
 
@@ -46,6 +59,7 @@ const badge = (text: string, cls: string): string =>
 const nav = (active: string): string => {
   const links: [string, string][] = [
     ["/", "Factory"],
+    ["/orders", "Orders"],
     ["/leads", "Leads"],
     ["/warehouse", "Warehouse"],
     ["/trash", "Trash"],
@@ -152,9 +166,21 @@ function renderFactory(state: FactoryState, flash?: string): string {
     ["N", "Factory Director", "direction", "All stages", "CorrectionBrief"],
   ]
 
+  const openOrders = state.orders.filter((o) => o.status === "new" || o.status === "in_production").length
+  const mode = openOrders > 0 ? "CLIENT_MODE" : "NO_CLIENT_TRAINING_MODE"
+
   return layout("Factory", "/", `
-<h1>Factory Core v0.1</h1>
-<p class="sub">Offer Acquisition Line — 14 agents — operator approval required before any offer leaves</p>
+<h1>Factory Core v0.2</h1>
+<p class="sub">
+  Offer Acquisition Line + Client Orders + Daily Training — operator approval required before anything leaves ·
+  ${badge(mode, openOrders > 0 ? "warn" : "info")} ·
+  ${badge(autopilotEnabled ? "autopilot ON" : "autopilot OFF", autopilotEnabled ? "ok" : "muted")}
+  <span class="dim" style="font-size:11px">last cycle: ${E(lastCycleSummary)}</span>
+</p>
+<form method="POST" action="/api/autopilot" style="margin-bottom:14px">
+  <input type="hidden" name="action" value="${autopilotEnabled ? "off" : "on"}">
+  <button type="submit">${autopilotEnabled ? "Pause Autopilot" : "Resume Autopilot"}</button>
+</form>
 ${flashHtml}
 <div class="stats">
   <div class="stat"><div class="v info">${state.signals.length}</div><div class="l">Signals</div></div>
@@ -220,9 +246,12 @@ ${leads.map((l) => `<tr>
 }
 
 function renderWarehouse(state: FactoryState): string {
+  const digitalAssets = state.dailyDigitals.filter((d) => d.location === "warehouse")
   return layout("Warehouse", "/warehouse", `
-<h1>Warehouse — Approved Offers</h1>
-<p class="sub">${state.warehouse.length} offers approved by operator · <strong style="color:#f85149">sent: false — no auto-send</strong></p>
+<h1>Warehouse — Approved Output</h1>
+<p class="sub">${state.warehouse.length} offers + ${digitalAssets.length} digital assets approved by operator · <strong style="color:#f85149">sent: false — no auto-send</strong></p>
+
+<h2>Approved Offers (${state.warehouse.length})</h2>
 ${state.warehouse.length === 0 ? '<p class="dim">No approved offers yet.</p>' : state.warehouse.map((item) => `
 <div class="form-card">
   <div style="margin-bottom:6px">
@@ -231,13 +260,27 @@ ${state.warehouse.length === 0 ? '<p class="dim">No approved offers yet.</p>' : 
   </div>
   <div class="offer-pre">${E(item.finalOffer.offerText)}</div>
   <div style="margin-top:6px;font-size:12px;color:#8b949e">Agent I routed to warehouse. Operator action required to use this offer externally.</div>
+</div>`).join("")}
+
+<h2>Digital Assets (${digitalAssets.length})</h2>
+${digitalAssets.length === 0 ? '<p class="dim">No digital assets in warehouse yet.</p>' : digitalAssets.map((d) => `
+<div class="form-card">
+  <div style="margin-bottom:6px">
+    ${badge(d.department, "info")} ${badge(d.orderId ? "client order" : "training", d.orderId ? "warn" : "muted")}
+    <strong>${E(d.title)}</strong>
+    <span class="dim" style="font-size:12px;margin-left:8px">score: ${d.qualityScore} · rev ${d.revisionCount} · ${E(d.date)}</span>
+  </div>
+  <div class="offer-pre">${E(d.content)}</div>
 </div>`).join("")}`)
 }
 
 function renderTrash(state: FactoryState): string {
+  const trashedDigitals = state.dailyDigitals.filter((d) => d.location === "trash")
   return layout("Trash", "/trash", `
 <h1>Trash — Disqualified &amp; Failed</h1>
-<p class="sub">${state.trash.length} items removed from pipeline</p>
+<p class="sub">${state.trash.length} pipeline items + ${trashedDigitals.length} rejected digital assets</p>
+
+<h2>Pipeline Items (${state.trash.length})</h2>
 ${state.trash.length === 0 ? '<p class="dim">No trash yet.</p>' : `
 <table>
 <thead><tr><th>ID</th><th>Signal ID</th><th>Reason</th><th>Trashed At</th></tr></thead>
@@ -249,12 +292,29 @@ ${state.trash.map((t) => `<tr>
   <td class="dim">${E(t.trashedAt.slice(0, 16).replace("T", " "))}</td>
 </tr>`).join("")}
 </tbody>
+</table>`}
+
+<h2>Rejected Digital Assets (${trashedDigitals.length})</h2>
+${trashedDigitals.length === 0 ? '<p class="dim">No rejected assets.</p>' : `
+<table>
+<thead><tr><th>ID</th><th>Dept</th><th>Title</th><th>Feedback</th><th>Date</th></tr></thead>
+<tbody>
+${trashedDigitals.map((d) => `<tr>
+  <td class="mono">${E(d.id)}</td>
+  <td>${badge(d.department, "muted")}</td>
+  <td>${E(d.title)}</td>
+  <td class="dim" style="font-size:12px">${E(d.operatorFeedback ?? "—")}</td>
+  <td class="dim">${E(d.date)}</td>
+</tr>`).join("")}
+</tbody>
 </table>`}`)
 }
 
 function renderDailyReview(state: FactoryState, flash?: string): string {
   const today = new Date().toISOString().slice(0, 10)
-  const todayItems = state.dailyDigitals.filter((d) => d.date === today)
+  // Training assets only — client-order deliverables are reviewed on /orders
+  const trainingItems = state.dailyDigitals.filter((d) => !d.orderId)
+  const todayItems = trainingItems.filter((d) => d.date === today)
   const pending = todayItems.filter((d) => d.status === "draft_ready" || d.status === "needs_rework")
   const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
 
@@ -327,7 +387,7 @@ function renderDailyReview(state: FactoryState, flash?: string): string {
   }
 
   // All history (older dates) collapsed
-  const olderItems = state.dailyDigitals.filter((d) => d.date !== today)
+  const olderItems = trainingItems.filter((d) => d.date !== today)
   const olderDates = [...new Set(olderItems.map((d) => d.date))].sort().reverse()
 
   return layout("Daily Review", "/daily-review", `
@@ -338,9 +398,9 @@ ${flashHtml}
 <div class="stats">
   <div class="stat"><div class="v info">${todayItems.length}</div><div class="l">Today</div></div>
   <div class="stat"><div class="v ${pending.length ? "warn" : "ok"}">${pending.length}</div><div class="l">Pending Review</div></div>
-  <div class="stat"><div class="v ok">${state.dailyDigitals.filter((d) => d.status === "accepted").length}</div><div class="l">Accepted</div></div>
-  <div class="stat"><div class="v ok">${state.dailyDigitals.filter((d) => d.location === "warehouse").length}</div><div class="l">In Warehouse</div></div>
-  <div class="stat"><div class="v bad">${state.dailyDigitals.filter((d) => d.status === "rejected").length}</div><div class="l">Rejected</div></div>
+  <div class="stat"><div class="v ok">${trainingItems.filter((d) => d.status === "accepted").length}</div><div class="l">Accepted</div></div>
+  <div class="stat"><div class="v ok">${trainingItems.filter((d) => d.location === "warehouse").length}</div><div class="l">In Warehouse</div></div>
+  <div class="stat"><div class="v bad">${trainingItems.filter((d) => d.status === "rejected").length}</div><div class="l">Rejected</div></div>
   <div class="stat"><div class="v muted">${state.feedbackEvents.length}</div><div class="l">Feedback Events</div></div>
 </div>
 
@@ -390,6 +450,97 @@ ${[...state.feedbackEvents].reverse().slice(0, 20).map((e) => `<tr>
 </tr>`).join("")}
 </tbody>
 </table>` : ""}`)
+}
+
+function renderOrders(state: FactoryState, flash?: string): string {
+  const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
+  const orders = [...state.orders].reverse()
+  const open = state.orders.filter((o) => o.status === "new" || o.status === "in_production")
+  const ready = state.orders.filter((o) => o.status === "ready_for_review")
+
+  const orderBadgeCls = (s: ClientOrder["status"]): string => {
+    if (s === "approved" || s === "closed") return "ok"
+    if (s === "ready_for_review") return "warn"
+    if (s === "rejected") return "bad"
+    return "info"
+  }
+
+  const deliverableBlock = (order: ClientOrder): string => {
+    const d = order.deliverableId ? state.dailyDigitals.find((x) => x.id === order.deliverableId) : undefined
+    if (!d) return '<div class="dim" style="font-size:12px">No deliverable yet — autopilot will produce it within a minute.</div>'
+    const reviewable = d.status === "draft_ready"
+    return `
+<div class="daily-content">${E(d.content)}</div>
+<div class="dim" style="font-size:11px;margin-bottom:8px">deliverable: ${E(d.id)} · score ${d.qualityScore} · rev ${d.revisionCount} · status ${E(d.status)}</div>
+${reviewable ? `
+<div class="daily-actions">
+  <form method="POST" action="/api/daily"><input type="hidden" name="action" value="warehouse"><input type="hidden" name="id" value="${E(d.id)}"><button class="ok" type="submit">Approve → Warehouse</button></form>
+  <div class="feedback-area">
+    <form method="POST" action="/api/daily" style="display:flex;flex-direction:column;gap:4px">
+      <input type="hidden" name="action" value="rework">
+      <input type="hidden" name="id" value="${E(d.id)}">
+      <input name="feedback" placeholder="What should change..." style="background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font:12px ui-sans-serif,sans-serif;padding:4px 8px" required>
+      <button type="submit" style="background:#34270a;color:#d29922;border-color:#4d3c14;align-self:flex-start">Request Rework</button>
+    </form>
+  </div>
+  <div class="feedback-area">
+    <form method="POST" action="/api/daily" style="display:flex;flex-direction:column;gap:4px">
+      <input type="hidden" name="action" value="reject">
+      <input type="hidden" name="id" value="${E(d.id)}">
+      <input name="feedback" placeholder="Reason for rejection..." style="background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font:12px ui-sans-serif,sans-serif;padding:4px 8px" required>
+      <button class="bad" type="submit" style="align-self:flex-start">Reject Order Output</button>
+    </form>
+  </div>
+</div>` : ""}`
+  }
+
+  return layout("Orders", "/orders", `
+<h1>Client Orders</h1>
+<p class="sub">Real work — a client order always takes priority over daily training. Nothing is delivered without operator approval.</p>
+${flashHtml}
+
+<div class="stats">
+  <div class="stat"><div class="v info">${state.orders.length}</div><div class="l">Total</div></div>
+  <div class="stat"><div class="v ${open.length ? "warn" : "ok"}">${open.length}</div><div class="l">In Production</div></div>
+  <div class="stat"><div class="v ${ready.length ? "warn" : "ok"}">${ready.length}</div><div class="l">Ready for Review</div></div>
+  <div class="stat"><div class="v ok">${state.orders.filter((o) => o.status === "approved" || o.status === "closed").length}</div><div class="l">Approved</div></div>
+  <div class="stat"><div class="v bad">${state.orders.filter((o) => o.status === "rejected").length}</div><div class="l">Rejected</div></div>
+</div>
+
+<div class="form-card">
+  <label>New client order — who is it for and what do they need?</label>
+  <form method="POST" action="/api/order">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <input name="clientName" placeholder="Client name / company" required style="flex:1;min-width:180px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:13px ui-sans-serif,sans-serif;padding:6px 10px">
+      <input name="contact" placeholder="Contact (optional)" style="flex:1;min-width:180px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:13px ui-sans-serif,sans-serif;padding:6px 10px">
+      <select name="department" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:13px ui-sans-serif,sans-serif;padding:6px 10px">
+        <option value="marketing">Marketing</option>
+        <option value="sales">Sales</option>
+        <option value="delivery" selected>Delivery</option>
+        <option value="research">Research</option>
+        <option value="qa">QA</option>
+      </select>
+    </div>
+    <textarea name="description" placeholder="e.g. Landing page copy for a construction company selling prefab garages — needs pricing section and a lead form CTA" required></textarea>
+    <div style="margin-top:8px"><button type="submit">Accept Order → Produce Now</button></div>
+  </form>
+</div>
+
+<h2>Orders (${orders.length})</h2>
+${orders.length === 0 ? '<p class="dim">No orders yet. When there are no orders, the factory runs 5 random daily training missions instead.</p>' : orders.map((o) => `
+<div class="daily-card ${o.status === "ready_for_review" ? "draft" : o.status === "approved" || o.status === "closed" ? "accepted" : o.status === "rejected" ? "rejected" : "needs_rework"}">
+  <div class="daily-header">
+    ${badge(o.status, orderBadgeCls(o.status))}
+    ${badge(o.department, "info")}
+    <span class="daily-title">${E(o.clientName)}</span>
+    <span class="mono dim" style="font-size:11px">${E(o.id)}</span>
+    ${o.taskType ? `<span class="dim" style="font-size:11px">task: ${E(o.taskType)}</span>` : ""}
+    ${o.revisionCount > 0 ? `<span class="dim" style="font-size:11px">rev ${o.revisionCount}</span>` : ""}
+  </div>
+  <div style="font-size:12.5px;color:#c9d1d9;margin-bottom:8px">"${E(o.description)}"</div>
+  ${o.operatorFeedback ? `<div style="font-size:12px;color:#d29922;margin-bottom:6px">Last feedback: ${E(o.operatorFeedback)}</div>` : ""}
+  ${deliverableBlock(o)}
+</div>`).join("")}`)
 }
 
 function renderEvents(state: FactoryState): string {
@@ -470,6 +621,7 @@ const server = createServer(async (req, res) => {
       if (url === "/trash") return html(res, renderTrash(state))
       if (url === "/events") return html(res, renderEvents(state))
       if (url === "/daily-review") return html(res, renderDailyReview(state))
+      if (url === "/orders") return html(res, renderOrders(state))
       return html(res, "<h1>404</h1>", 404)
     }
 
@@ -508,7 +660,7 @@ const server = createServer(async (req, res) => {
         const warehouseItem = agentI(updated)
         store.addWarehouseItem(warehouseItem)
         store.addEvent({
-          id: `evt-${Date.now()}`,
+          id: randomUUID(),
           timestamp: new Date().toISOString(),
           agentId: "I",
           eventType: "approval.granted",
@@ -524,7 +676,7 @@ const server = createServer(async (req, res) => {
           trashedAt: new Date().toISOString(),
         })
         store.addEvent({
-          id: `evt-${Date.now()}`,
+          id: randomUUID(),
           timestamp: new Date().toISOString(),
           agentId: "H",
           eventType: "approval.rejected",
@@ -548,31 +700,87 @@ const server = createServer(async (req, res) => {
       const feedback = (params["feedback"] ?? "").trim()
       const date = params["date"] ?? new Date().toISOString().slice(0, 10)
 
+      // Order deliverables review here too — sync the order status afterwards
+      // and send the operator back to /orders instead of /daily-review.
+      const digitalBefore = store.getDailyDigital(id)
+      const orderId = digitalBefore?.orderId
+      const respond = (flash: string) =>
+        orderId
+          ? html(res, renderOrders(store.snapshot(), flash))
+          : html(res, renderDailyReview(store.snapshot(), flash))
+      const syncOrder = (status: "approved" | "rejected" | "in_production", fb?: string) => {
+        if (!orderId) return
+        store.updateOrder(orderId, {
+          status,
+          ...(fb ? { operatorFeedback: fb } : {}),
+          updatedAt: new Date().toISOString(),
+        })
+      }
+
       if (action === "run") {
         try {
-          await runDailyMissions(store, date)
-          return html(res, renderDailyReview(store.snapshot(), `5 missions run for ${date}`))
+          const result = await runAutonomousCycle(store, date)
+          lastCycleSummary = `${result.mode}: training=${result.trainingCreated} orders=${result.ordersProduced.length} reworks=${result.reworksRegenerated.length}`
+          return html(res, renderDailyReview(store.snapshot(), `Cycle done — ${lastCycleSummary}`))
         } catch (err) {
           return html(res, renderDailyReview(store.snapshot(), `Error: ${String(err)}`))
         }
       }
       if (action === "accept" && id) {
         acceptDigital(store, id)
-        return html(res, renderDailyReview(store.snapshot(), "Accepted."))
+        syncOrder("approved")
+        return respond("Accepted.")
       }
       if (action === "rework" && id && feedback) {
         reworkDigital(store, id, feedback)
-        return html(res, renderDailyReview(store.snapshot(), `Marked for rework — feedback stored for next run.`))
+        syncOrder("in_production", feedback)
+        return respond("Marked for rework — the autopilot will regenerate it with your feedback.")
       }
       if (action === "reject" && id && feedback) {
         rejectDigital(store, id, feedback)
-        return html(res, renderDailyReview(store.snapshot(), "Rejected and moved to trash."))
+        syncOrder("rejected", feedback)
+        return respond("Rejected and moved to trash.")
       }
       if (action === "warehouse" && id) {
         warehouseDigital(store, id)
-        return html(res, renderDailyReview(store.snapshot(), "Sent to Warehouse."))
+        syncOrder("approved")
+        return respond("Sent to Warehouse.")
       }
-      return html(res, renderDailyReview(store.snapshot(), "Error: unknown action or missing id/feedback."))
+      return respond("Error: unknown action or missing id/feedback.")
+    }
+
+    if (method === "POST" && url === "/api/order") {
+      const params = await readBody(req)
+      const clientName = (params["clientName"] ?? "").trim()
+      const description = (params["description"] ?? "").trim()
+      const contact = (params["contact"] ?? "").trim()
+      const department = (params["department"] ?? "delivery") as DailyDigitalDepartment
+      if (!clientName || !description) {
+        return html(res, renderOrders(store.snapshot(), "Error: client name and description are required"))
+      }
+      const order = createOrder(store, {
+        clientName,
+        description,
+        department,
+        ...(contact ? { contact } : {}),
+      })
+      // Produce immediately — the client should not wait for the next timer tick.
+      const result = await runAutonomousCycle(store)
+      lastCycleSummary = `${result.mode}: orders=${result.ordersProduced.length}`
+      return html(res, renderOrders(store.snapshot(), `Order ${order.id} accepted and produced — review the deliverable below.`))
+    }
+
+    if (method === "POST" && url === "/api/autopilot") {
+      const params = await readBody(req)
+      autopilotEnabled = params["action"] !== "off"
+      store.addEvent({
+        id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        agentId: "N",
+        eventType: autopilotEnabled ? "factory.autopilot_on" : "factory.autopilot_off",
+        detail: `Operator turned autopilot ${autopilotEnabled ? "on" : "off"}`,
+      })
+      return html(res, renderFactory(store.snapshot(), `Autopilot ${autopilotEnabled ? "resumed" : "paused"}.`))
     }
 
     html(res, "<h1>404</h1>", 404)
@@ -582,13 +790,33 @@ const server = createServer(async (req, res) => {
   }
 })
 
+// --- Autopilot loop: client orders first, training when idle, always bounded ---
+
+async function autopilotTick(): Promise<void> {
+  if (!autopilotEnabled) return
+  try {
+    const r = await runAutonomousCycle(store)
+    lastCycleSummary = `${r.mode}: training=${r.trainingCreated} orders=${r.ordersProduced.length} reworks=${r.reworksRegenerated.length}`
+    if (r.ordersProduced.length + r.reworksRegenerated.length + r.trainingCreated > 0) {
+      console.log(`[autopilot] ${lastCycleSummary}`)
+    }
+  } catch (err) {
+    console.error("[autopilot] cycle failed:", err)
+  }
+}
+
+setInterval(autopilotTick, 60_000)
+
 server.listen(PORT, () => {
-  console.log(`\nFactory Core v0.1 — http://localhost:${PORT}`)
-  console.log("  / or /factory  — pipeline overview + signal form")
+  console.log(`\nFactory Core v0.2 — http://localhost:${PORT}`)
+  console.log("  / or /factory  — pipeline overview + signal form + autopilot toggle")
+  console.log("  /orders        — client orders: intake, production, review")
   console.log("  /leads         — qualified leads")
-  console.log("  /warehouse     — approved offers")
-  console.log("  /trash         — disqualified / failed")
+  console.log("  /warehouse     — approved offers + digital assets")
+  console.log("  /trash         — disqualified / failed / rejected")
   console.log("  /events        — full event log")
   console.log("  /daily-review  — NO_CLIENT_TRAINING_MODE daily review")
-  console.log("\nPress Ctrl+C to stop.\n")
+  console.log("\nAutopilot: ON (60s cycle) — orders → reworks → 5 random daily training missions.")
+  console.log("Press Ctrl+C to stop.\n")
+  void autopilotTick()
 })

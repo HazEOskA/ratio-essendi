@@ -150,11 +150,13 @@ export type DailyDigital = {
   title: string
   department: DailyDigitalDepartment
   type: string
+  taskType?: string
   content: string
   status: DailyDigitalStatus
   qualityScore: number
   createdByAgentId: MissionAgentId
   linkedMissionId: string
+  orderId?: string
   operatorFeedback?: string
   revisionCount: number
   createdAt: string
@@ -182,6 +184,36 @@ export type FeedbackEvent = {
   nextRevisionTaskId?: string
 }
 
+// --- Client orders (real work) ---
+
+export type OrderStatus = "new" | "in_production" | "ready_for_review" | "approved" | "rejected" | "closed"
+
+export type ClientOrder = {
+  id: string
+  clientName: string
+  contact?: string
+  description: string
+  department: DailyDigitalDepartment
+  taskType?: string
+  status: OrderStatus
+  deliverableId?: string
+  operatorFeedback?: string
+  revisionCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+// --- Autonomous cycle ---
+
+export type FactoryMode = "CLIENT_MODE" | "NO_CLIENT_TRAINING_MODE" | "IDLE"
+
+export type CycleResult = {
+  mode: FactoryMode
+  ordersProduced: string[]
+  reworksRegenerated: string[]
+  trainingCreated: number
+}
+
 // --- Full factory state snapshot ---
 
 export type FactoryState = {
@@ -194,4 +226,5 @@ export type FactoryState = {
   dailyDigitals: DailyDigital[]
   dailyMissions: DailyMission[]
   feedbackEvents: FeedbackEvent[]
+  orders: ClientOrder[]
 }

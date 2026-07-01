@@ -22,6 +22,11 @@ import {
   reworkDigital,
   rejectDigital,
   warehouseDigital,
+  createOrder,
+  produceOrderDeliverable,
+  inferTaskType,
+  runAutonomousCycle,
+  regenerateDigital,
 } from "@ratio-essendi/factory-core"
 import type { Signal, QualifiedLead, ScoredOffer } from "@ratio-essendi/factory-core"
 
@@ -51,10 +56,13 @@ function unqualifiedSignal(): Signal {
 
 // 1. Registry validation
 
-test("registry: all 14 agents defined", () => {
-  assert.equal(AGENT_REGISTRY.length, 14)
+test("registry: all 19 agents defined (14 pipeline + 5 producers)", () => {
+  assert.equal(AGENT_REGISTRY.length, 19)
   const ids = AGENT_REGISTRY.map((a) => a.id)
-  for (const id of ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N"] as const) {
+  for (const id of [
+    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
+    "MA", "SA", "DA", "RA", "QAA",
+  ] as const) {
     assert.ok(ids.includes(id), `Agent ${id} missing from registry`)
   }
 })
@@ -427,7 +435,7 @@ test("feedback loop: next run incorporates rework feedback as constraints", asyn
     const mkt2 = day2.find((d) => d.department === "marketing")!
     // The constraint must appear in the content (constraintHeader is prepended)
     assert.ok(
-      mkt2.content.includes("too generic") || mkt2.content.includes("OPERATOR FEEDBACK"),
+      mkt2.content.includes("too generic") || mkt2.content.includes("PRODUCTION CONSTRAINTS"),
       "next run must incorporate operator feedback in content",
     )
   } finally {
@@ -442,6 +450,169 @@ test("all 5 daily events logged to factory event store", async () => {
     const state = store.snapshot()
     const missionEvents = state.events.filter((e) => e.eventType === "daily.mission_complete")
     assert.equal(missionEvents.length, 5, `Expected 5 mission events, got ${missionEvents.length}`)
+  } finally {
+    cleanup()
+  }
+})
+
+// 5. Client Order tests
+
+test("createOrder: order stored as new with inferred task type and order.received logged", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const order = createOrder(store, {
+      clientName: "BudMax Sp. z o.o.",
+      description: "Landing page copy for construction companies selling prefab garages",
+      department: "delivery",
+    })
+    assert.equal(order.status, "new")
+    assert.equal(order.taskType, "landing-template", "should infer landing-template from 'landing page'")
+    const state = store.snapshot()
+    assert.equal(state.orders.length, 1)
+    assert.ok(state.events.some((e) => e.eventType === "order.received"))
+  } finally {
+    cleanup()
+  }
+})
+
+test("inferTaskType: maps descriptions to concrete task types", () => {
+  assert.equal(inferTaskType("marketing", "we need ads for facebook"), "ad-pack")
+  assert.equal(inferTaskType("sales", "handle common objections from buyers"), "objection-map")
+  assert.equal(inferTaskType("research", "keyword set for SEO"), "keyword-set")
+})
+
+test("produceOrderDeliverable: deliverable built from client brief, order → ready_for_review", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const order = createOrder(store, {
+      clientName: "BudMax",
+      description: "Landing page for construction companies selling prefab garages",
+      department: "delivery",
+    })
+    const deliverable = produceOrderDeliverable(store, order.id)
+    assert.ok(deliverable, "deliverable must be produced")
+    assert.equal(deliverable!.orderId, order.id)
+    assert.equal(deliverable!.status, "draft_ready")
+    assert.ok(
+      deliverable!.content.includes("construction"),
+      "content must reflect the client brief (construction niche)",
+    )
+    const updated = store.getOrder(order.id)!
+    assert.equal(updated.status, "ready_for_review")
+    assert.equal(updated.deliverableId, deliverable!.id)
+    assert.ok(store.snapshot().events.some((e) => e.eventType === "order.produced"))
+  } finally {
+    cleanup()
+  }
+})
+
+test("produceOrderDeliverable: idempotent while deliverable awaits review", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const order = createOrder(store, {
+      clientName: "BudMax",
+      description: "demo script for our sales team",
+      department: "delivery",
+    })
+    produceOrderDeliverable(store, order.id)
+    // Order is now ready_for_review — a second call must not produce again
+    const again = produceOrderDeliverable(store, order.id)
+    assert.equal(again, undefined)
+    const deliverables = store.snapshot().dailyDigitals.filter((d) => d.orderId === order.id)
+    assert.equal(deliverables.length, 1)
+  } finally {
+    cleanup()
+  }
+})
+
+// 6. Autonomous cycle tests
+
+test("autonomous cycle: open order → CLIENT_MODE, deliverable produced, no training that cycle", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    createOrder(store, {
+      clientName: "BudMax",
+      description: "Landing page for construction companies",
+      department: "delivery",
+    })
+    const result = await runAutonomousCycle(store, "2026-07-01")
+    assert.equal(result.mode, "CLIENT_MODE")
+    assert.equal(result.ordersProduced.length, 1)
+    assert.equal(result.trainingCreated, 0, "client work must take priority over training")
+    const training = store.getDailyDigitalsForDate("2026-07-01").filter((d) => !d.orderId)
+    assert.equal(training.length, 0)
+  } finally {
+    cleanup()
+  }
+})
+
+test("autonomous cycle: no orders → NO_CLIENT_TRAINING_MODE with 5 random missions", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const result = await runAutonomousCycle(store, "2026-07-01")
+    assert.equal(result.mode, "NO_CLIENT_TRAINING_MODE")
+    assert.equal(result.trainingCreated, 5)
+    const training = store.getDailyDigitalsForDate("2026-07-01").filter((d) => !d.orderId)
+    assert.equal(training.length, 5)
+  } finally {
+    cleanup()
+  }
+})
+
+test("autonomous cycle: second run same day is IDLE (bounded, no queue spam)", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    await runAutonomousCycle(store, "2026-07-01")
+    const second = await runAutonomousCycle(store, "2026-07-01")
+    assert.equal(second.mode, "IDLE")
+    assert.equal(second.trainingCreated, 0)
+    assert.equal(second.ordersProduced.length, 0)
+    const training = store.getDailyDigitalsForDate("2026-07-01").filter((d) => !d.orderId)
+    assert.equal(training.length, 5, "still exactly 5 — never more")
+  } finally {
+    cleanup()
+  }
+})
+
+test("autonomous cycle: executes pending rework with feedback applied and bumps revision", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    await runAutonomousCycle(store, "2026-07-01")
+    const training = store.getDailyDigitalsForDate("2026-07-01").filter((d) => !d.orderId)
+    const mkt = training.find((d) => d.department === "marketing")!
+    reworkDigital(store, mkt.id, "too generic, make it concrete for construction companies")
+
+    const result = await runAutonomousCycle(store, "2026-07-01")
+    assert.ok(result.reworksRegenerated.includes(mkt.id))
+    const regenerated = store.getDailyDigital(mkt.id)!
+    assert.equal(regenerated.status, "draft_ready")
+    assert.equal(regenerated.revisionCount, 1)
+    assert.ok(
+      regenerated.content.includes("construction"),
+      "regenerated content must apply the operator feedback",
+    )
+  } finally {
+    cleanup()
+  }
+})
+
+test("regenerateDigital: order deliverable rework re-applies client brief and returns order to review", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const order = createOrder(store, {
+      clientName: "BudMax",
+      description: "Landing page for construction companies",
+      department: "delivery",
+    })
+    const deliverable = produceOrderDeliverable(store, order.id)!
+    reworkDigital(store, deliverable.id, "add a pricing table for prefab garages")
+    store.updateOrder(order.id, { status: "in_production" })
+
+    const regenerated = regenerateDigital(store, deliverable.id)!
+    assert.equal(regenerated.status, "draft_ready")
+    assert.equal(regenerated.revisionCount, 1)
+    assert.ok(regenerated.content.includes("construction"), "client brief must survive rework")
+    assert.equal(store.getOrder(order.id)!.status, "ready_for_review")
   } finally {
     cleanup()
   }

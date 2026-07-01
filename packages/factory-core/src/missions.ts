@@ -26,7 +26,7 @@ import type { FactoryStore } from "./store.js"
 const ICP = "Seed-stage B2B SaaS founders (10–50 employees)"
 const PRODUCT = "Fractional RevOps sprint — 2 weeks, fixed scope, €2,500–€4,500"
 
-const TASK_TYPES: Record<DailyDigitalDepartment, string[]> = {
+export const TASK_TYPES: Record<DailyDigitalDepartment, string[]> = {
   marketing: ["ad-pack", "hook-set", "carousel-outline", "landing-section", "campaign-angle"],
   sales: ["pitch-pack", "objection-map", "follow-up-script", "qualification-questions", "offer-draft-template"],
   delivery: ["demo-block", "onboarding-checklist", "landing-template", "dashboard-component-plan", "repo-task-draft"],
@@ -34,7 +34,7 @@ const TASK_TYPES: Record<DailyDigitalDepartment, string[]> = {
   qa: ["qa-report", "cleanup-report", "agent-improvement-report", "weak-asset-review", "next-day-plan"],
 }
 
-const DEPT_AGENT: Record<DailyDigitalDepartment, MissionAgentId> = {
+export const DEPT_AGENT: Record<DailyDigitalDepartment, MissionAgentId> = {
   marketing: "MA",
   sales: "SA",
   delivery: "DA",
@@ -62,13 +62,15 @@ function dayOfYear(date: string): number {
   return Math.floor((d.getTime() - new Date(d.getFullYear(), 0, 0).getTime()) / 86400000)
 }
 
-function selectTaskType(dept: DailyDigitalDepartment, date: string): string {
-  return TASK_TYPES[dept][dayOfYear(date) % TASK_TYPES[dept].length]!
+/** Random pick — daily training tasks are randomised, not a fixed rotation. */
+function selectTaskType(dept: DailyDigitalDepartment): string {
+  const list = TASK_TYPES[dept]
+  return list[Math.floor(Math.random() * list.length)]!
 }
 
 function constraintHeader(constraints: string[]): string {
   if (constraints.length === 0) return ""
-  return `OPERATOR FEEDBACK APPLIED:\n${constraints.map((c) => `• ${c}`).join("\n")}\n\n`
+  return `PRODUCTION CONSTRAINTS (operator/client input):\n${constraints.map((c) => `• ${c}`).join("\n")}\n\n`
 }
 
 function extractNicheFocus(constraints: string[]): string {
@@ -1396,6 +1398,17 @@ function generateContent(dept: DailyDigitalDepartment, taskType: string, date: s
   }
 }
 
+/** Public generator — used by the order line and rework regeneration too. */
+export function generateAssetContent(
+  dept: DailyDigitalDepartment,
+  taskType: string,
+  date: string,
+  constraints: string[],
+): { title: string; content: string; qualityScore: number } {
+  const g = generateContent(dept, taskType, date, constraints)
+  return { title: g.title, content: g.content, qualityScore: scoreContent(g.content, constraints) }
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 const DEPARTMENTS: DailyDigitalDepartment[] = ["marketing", "sales", "delivery", "research", "qa"]
@@ -1403,8 +1416,8 @@ const DEPARTMENTS: DailyDigitalDepartment[] = ["marketing", "sales", "delivery",
 export async function runDailyMissions(store: FactoryStore, date?: string): Promise<DailyDigital[]> {
   const today = date ?? new Date().toISOString().slice(0, 10)
 
-  // Idempotent — skip if already run for today
-  const existing = store.getDailyDigitalsForDate(today)
+  // Idempotent — skip if already run for today (client-order deliverables don't count)
+  const existing = store.getDailyDigitalsForDate(today).filter((d) => !d.orderId)
   if (existing.length >= 5) return existing
 
   // Collect recent operator feedback per department (last 7 days)
@@ -1413,7 +1426,7 @@ export async function runDailyMissions(store: FactoryStore, date?: string): Prom
   const digitals: DailyDigital[] = []
 
   for (const dept of DEPARTMENTS) {
-    const taskType = selectTaskType(dept, today)
+    const taskType = selectTaskType(dept)
     const constraints = constraintsByDept[dept] ?? []
     const generated = generateContent(dept, taskType, today, constraints)
     const score = scoreContent(generated.content, constraints)
@@ -1427,6 +1440,7 @@ export async function runDailyMissions(store: FactoryStore, date?: string): Prom
       title: generated.title,
       department: dept,
       type: `${dept}_asset`,
+      taskType,
       content: generated.content,
       status: "draft_ready",
       qualityScore: score,
@@ -1534,6 +1548,58 @@ export function rejectDigital(store: FactoryStore, id: string, feedback: string)
     eventType: "daily.rejected",
     detail: `${d.title} rejected: "${feedback.slice(0, 80)}"`,
   })
+}
+
+/**
+ * Executes the revision job created by reworkDigital: regenerates content with
+ * the operator feedback as a hard constraint, bumps revisionCount, and puts the
+ * asset back into review. For order deliverables the client brief is included
+ * and the order goes back to ready_for_review.
+ */
+export function regenerateDigital(store: FactoryStore, id: string): DailyDigital | undefined {
+  const d = store.getDailyDigital(id)
+  if (!d || d.status !== "needs_rework") return undefined
+
+  const constraints: string[] = []
+  if (d.orderId) {
+    const order = store.getOrder(d.orderId)
+    if (order) constraints.push(`Client brief from ${order.clientName}: ${order.description}`)
+  }
+  if (d.operatorFeedback) constraints.push(d.operatorFeedback)
+  const deptFeedback = store.getRecentFeedbackConstraints(7)[d.department] ?? []
+  for (const fb of deptFeedback) if (!constraints.includes(fb)) constraints.push(fb)
+
+  const taskType = d.taskType ?? selectTaskType(d.department)
+  const generated = generateAssetContent(d.department, taskType, d.date, constraints)
+  const now = new Date().toISOString()
+
+  store.updateDailyDigital(id, {
+    title: generated.title,
+    content: generated.content,
+    qualityScore: generated.qualityScore,
+    taskType,
+    status: "draft_ready",
+    revisionCount: d.revisionCount + 1,
+    updatedAt: now,
+  })
+
+  if (d.orderId) {
+    store.updateOrder(d.orderId, {
+      status: "ready_for_review",
+      revisionCount: (store.getOrder(d.orderId)?.revisionCount ?? 0) + 1,
+      updatedAt: now,
+    })
+  }
+
+  store.addEvent({
+    id: randomUUID(),
+    timestamp: now,
+    agentId: DEPT_AGENT[d.department],
+    eventType: d.orderId ? "order.regenerated" : "daily.regenerated",
+    detail: `${d.id} rev ${d.revisionCount + 1} — feedback applied: "${(d.operatorFeedback ?? "").slice(0, 60)}"`,
+  })
+
+  return store.getDailyDigital(id)
 }
 
 export function warehouseDigital(store: FactoryStore, id: string): void {

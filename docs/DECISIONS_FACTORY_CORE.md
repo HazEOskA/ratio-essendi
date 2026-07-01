@@ -39,3 +39,23 @@ Agent B qualifies at ≥0.5 fit score (vs 0.75 in the dashboard prospecting laye
 ## FC-010 — No External Dependencies in Factory Core
 
 `@ratio-essendi/factory-core` depends only on `@ratio-essendi/shared`, `@ratio-essendi/evaluation-engine`, and `@ratio-essendi/offer-builder`. It does not import from the `meta-governor` or `dashboard` packages. This keeps the factory independently deployable and testable.
+
+## FC-011 — Client Orders Always Beat Training
+
+`runAutonomousCycle()` has a fixed priority: open client orders → pending reworks → daily training. Training missions are only created when there are zero orders in `new`/`in_production`. An order waiting for operator review (`ready_for_review`) does not block training — the ball is in the operator's court, and the factory keeps itself sharp while it waits.
+
+## FC-012 — Autopilot Is Bounded, Not Ambitious
+
+The autopilot may run on a timer precisely because every operation it performs is idempotent: orders produce once, reworks run only on operator-flagged items, training is capped at 5/day. This is the structural answer to the auto-tick spam incident (decision 013 in docs/15): background loops may only do work that has a natural upper bound, and all of it stops at the review gate.
+
+## FC-013 — Random Training Selection, Stable Within a Day
+
+Daily training task types are selected randomly per run (not by `dayOfYear` rotation), per the operator's requirement of "5 random tasks". Idempotency per date is preserved: once a day's set exists, re-runs return it unchanged.
+
+## FC-014 — Rework Is a Job, Not a Label
+
+`needs_rework` is not a terminal status. It is a queued revision job that the autopilot executes: content is regenerated with the operator feedback (and the client brief, for orders) as hard constraints, `revisionCount` increments, and the asset returns to review. Feedback that is never applied is a broken promise to the operator.
+
+## FC-015 — Producers Are Registered Agents
+
+The five mission producers (MA, SA, DA, RA, QAA) are full registry members with watch/trigger/nextAction contracts, subject to the same "no dead agents" validation as pipeline agents A–N. Registry size is 19. An agent that produces output but has no contract is an audit finding, not a shortcut.

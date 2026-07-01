@@ -22,6 +22,10 @@ export type {
   DailyDigital,
   DailyMission,
   FeedbackEvent,
+  ClientOrder,
+  OrderStatus,
+  FactoryMode,
+  CycleResult,
 } from "./types.js"
 
 export { JsonStore, FactoryStore } from "./store.js"
@@ -34,4 +38,11 @@ export {
   reworkDigital,
   rejectDigital,
   warehouseDigital,
+  regenerateDigital,
+  generateAssetContent,
+  TASK_TYPES,
+  DEPT_AGENT,
 } from "./missions.js"
+export { createOrder, produceOrderDeliverable, inferTaskType } from "./orders.js"
+export type { OrderInput } from "./orders.js"
+export { runAutonomousCycle } from "./autopilot.js"

@@ -1,6 +1,6 @@
 # Agent Work Contract
 
-Every agent in Factory Core must satisfy this contract. An agent that does not meet all three requirements is a dead agent and will be rejected by `validateRegistry()`.
+Every agent in Factory Core must satisfy this contract. An agent that does not meet all three requirements is a dead agent and will be rejected by `validateRegistry()`. The registry holds 19 agents: 14 pipeline agents (A–N) and 5 production agents (MA, SA, DA, RA, QAA).
 
 ## Contract Fields
 
@@ -36,6 +36,16 @@ Must name a concrete output type or state transition.
 | L | Quality Auditor | WarehouseItems | new item arrives in Warehouse | → QualityMetric |
 | M | Performance Reporter | QualityMetrics | quality.metric logged | → Scorecard update |
 | N | Factory Director | All pipeline stages and event log | drift in any stage or pipeline stall | → CorrectionBrief |
+
+## The 5 Production Agents (Client Orders + Daily Training)
+
+| ID | Name | Watch | Trigger | Next Action |
+|----|------|-------|---------|-------------|
+| MA | Marketing Producer | Orders (dept=marketing) + daily marketing slot | open order or missing training asset for today | → marketing_asset in daily_review |
+| SA | Sales Producer | Orders (dept=sales) + daily sales slot | open order or missing training asset for today | → sales_asset in daily_review |
+| DA | Delivery Producer | Orders (dept=delivery) + daily delivery slot | open order or missing training asset for today | → delivery_asset in daily_review |
+| RA | Research Producer | Orders (dept=research) + daily research slot | open order or missing training asset for today | → research_asset in daily_review |
+| QAA | QA Producer | Orders (dept=qa) + daily qa slot + needs_rework flags | open order, missing training asset, or revision job pending | → qa_asset / regenerated asset in daily_review |
 
 ## Rules
 

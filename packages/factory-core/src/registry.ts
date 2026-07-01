@@ -113,6 +113,46 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
     trigger: "drift in any stage or pipeline stall detected",
     nextAction: "Issue correction brief, reset stalled stage, log factory.correction_issued",
   },
+  {
+    id: "MA",
+    name: "Marketing Producer",
+    role: "production-marketing",
+    watch: "Client orders routed to marketing + daily marketing mission slot",
+    trigger: "open order (dept=marketing) or missing marketing training asset for today",
+    nextAction: "Generate marketing_asset with client brief / feedback constraints → daily_review",
+  },
+  {
+    id: "SA",
+    name: "Sales Producer",
+    role: "production-sales",
+    watch: "Client orders routed to sales + daily sales mission slot",
+    trigger: "open order (dept=sales) or missing sales training asset for today",
+    nextAction: "Generate sales_asset with client brief / feedback constraints → daily_review",
+  },
+  {
+    id: "DA",
+    name: "Delivery Producer",
+    role: "production-delivery",
+    watch: "Client orders routed to delivery + daily delivery mission slot",
+    trigger: "open order (dept=delivery) or missing delivery training asset for today",
+    nextAction: "Generate delivery_asset with client brief / feedback constraints → daily_review",
+  },
+  {
+    id: "RA",
+    name: "Research Producer",
+    role: "production-research",
+    watch: "Client orders routed to research + daily research mission slot",
+    trigger: "open order (dept=research) or missing research training asset for today",
+    nextAction: "Generate research_asset with client brief / feedback constraints → daily_review",
+  },
+  {
+    id: "QAA",
+    name: "QA Producer",
+    role: "production-qa",
+    watch: "Client orders routed to qa + daily qa mission slot + needs_rework flags",
+    trigger: "open order (dept=qa), missing qa training asset for today, or revision job pending",
+    nextAction: "Generate qa_asset / regenerate flagged assets with feedback → daily_review",
+  },
 ]
 
 export function getAgent(id: AgentId): AgentDefinition {

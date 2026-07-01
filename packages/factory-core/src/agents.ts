@@ -3,6 +3,7 @@
  * Each function is a pure transform — no side effects, no external calls.
  * selectOfferProvider() is used by Agent E when ANTHROPIC_API_KEY is set.
  */
+import { randomUUID } from "node:crypto"
 import type {
   Signal,
   IntakeBrief,
@@ -230,10 +231,7 @@ export function agentG(scored: ScoredOffer): DraftOffer {
 
 // --- Agent H: Approval Gatekeeper ---
 
-let _approvalSeq = 0
-
 export function agentH(scored: ScoredOffer, signalId: string): { final: FinalOffer; item: ApprovalItem } {
-  _approvalSeq++
   const final: FinalOffer = {
     signalId,
     offerText: scored.draft.offerText,
@@ -242,7 +240,9 @@ export function agentH(scored: ScoredOffer, signalId: string): { final: FinalOff
     agentId: scored.draft.iteration > 1 ? "G" : "E",
   }
   const item: ApprovalItem = {
-    id: `ai-${_approvalSeq}`,
+    // Random id, not a module counter — a counter resets on restart and
+    // collides with approval items already persisted in the store.
+    id: `ai-${randomUUID().slice(0, 8)}`,
     signalId,
     finalOffer: final,
     status: "pending",

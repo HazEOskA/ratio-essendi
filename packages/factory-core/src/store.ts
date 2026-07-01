@@ -12,6 +12,7 @@ import type {
   DailyDigitalDepartment,
   DailyMission,
   FeedbackEvent,
+  ClientOrder,
 } from "./types.js"
 
 export class JsonStore<T> {
@@ -56,6 +57,7 @@ export class FactoryStore {
   readonly #dailyDigitals: JsonStore<DailyDigital[]>
   readonly #dailyMissions: JsonStore<DailyMission[]>
   readonly #feedbackEvents: JsonStore<FeedbackEvent[]>
+  readonly #orders: JsonStore<ClientOrder[]>
 
   constructor(dataDir: string) {
     const p = (name: string) => join(dataDir, `${name}.json`)
@@ -68,6 +70,7 @@ export class FactoryStore {
     this.#dailyDigitals = new JsonStore(p("daily-digitals"), [])
     this.#dailyMissions = new JsonStore(p("daily-missions"), [])
     this.#feedbackEvents = new JsonStore(p("feedback-events"), [])
+    this.#orders = new JsonStore(p("orders"), [])
   }
 
   snapshot(): FactoryState {
@@ -81,6 +84,7 @@ export class FactoryStore {
       dailyDigitals: this.#dailyDigitals.read(),
       dailyMissions: this.#dailyMissions.read(),
       feedbackEvents: this.#feedbackEvents.read(),
+      orders: this.#orders.read(),
     }
   }
 
@@ -146,6 +150,30 @@ export class FactoryStore {
 
   addFeedbackEvent(e: FeedbackEvent): void {
     this.#feedbackEvents.update((arr) => [...arr, e])
+  }
+
+  /** Digitals flagged needs_rework — the autopilot regenerates these. */
+  getDigitalsNeedingRework(): DailyDigital[] {
+    return this.#dailyDigitals.read().filter((d) => d.status === "needs_rework")
+  }
+
+  // --- Client orders ---
+
+  addOrder(o: ClientOrder): void {
+    this.#orders.update((arr) => [...arr, o])
+  }
+
+  updateOrder(id: string, patch: Partial<ClientOrder>): void {
+    this.#orders.update((arr) => arr.map((o) => (o.id === id ? { ...o, ...patch } : o)))
+  }
+
+  getOrder(id: string): ClientOrder | undefined {
+    return this.#orders.read().find((o) => o.id === id)
+  }
+
+  /** Orders the factory still has to produce for (client work in progress). */
+  getOpenOrders(): ClientOrder[] {
+    return this.#orders.read().filter((o) => o.status === "new" || o.status === "in_production")
   }
 
   /** Returns recent operator feedback text grouped by department, from needs_rework and rejected items. */
