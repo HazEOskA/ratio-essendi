@@ -280,6 +280,172 @@ test("GET /api/work-runs is read-only and returns recent runs with full steps", 
   assert.deepEqual(after, before, "GET /api/work-runs must not mutate the store")
 })
 
+test("service catalog visible on /factory-run and in /api/admin/state business loop", async () => {
+  const page = await (await fetch(`${BASE}/factory-run`)).text()
+  assert.match(page, /Service Catalog \(6\)/)
+  for (const name of [
+    "AI Workflow Audit \\+ Mini Demo",
+    "Website / Landing Page Audit",
+    "Recruitment / Agency Ops Workflow Audit",
+    "Client Dashboard Concept",
+    "Social Content / Carousel Pack",
+    "Process Automation Blueprint",
+  ]) {
+    assert.match(page, new RegExp(name), `service must be listed: ${name}`)
+  }
+  assert.match(page, /Why It Is Standing Still/)
+  assert.match(page, /SAFE MODE — no external send/)
+
+  const state = (await (await fetch(`${BASE}/api/admin/state`)).json()) as {
+    businessLoop: { servicesInCatalog: number; deliveryPacks: { draft: number }; caseRecords: number; trainingToday: string }
+  }
+  assert.equal(state.businessLoop.servicesInCatalog, 6)
+  assert.equal(state.businessLoop.trainingToday, "5/5")
+})
+
+test("invalid service id is rejected cleanly: 400 JSON, no order, no order event", async () => {
+  const ordersBefore = (dataFile("orders.json") as unknown[]).length
+  const orderEventsBefore = (dataFile("events.json") as { eventType: string }[])
+    .filter((e) => e.eventType.startsWith("order.")).length
+
+  const res = await fetch(`${BASE}/api/order`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      clientName: "EvilCo",
+      department: "sales",
+      serviceId: "svc-nonexistent",
+      description: "anything",
+    }),
+  })
+  assert.equal(res.status, 400)
+  const body = (await res.json()) as { error: string; received: string; allowed: string[] }
+  assert.equal(body.error, "invalid service")
+  assert.equal(body.received, "svc-nonexistent")
+  assert.equal(body.allowed.length, 6)
+
+  assert.equal((dataFile("orders.json") as unknown[]).length, ordersBefore, "no order may be created")
+  const orderEventsAfter = (dataFile("events.json") as { eventType: string }[])
+    .filter((e) => e.eventType.startsWith("order.")).length
+  assert.equal(orderEventsAfter, orderEventsBefore, "no order.* event may be written")
+})
+
+test("demo HVAC order: explicit action creates a service-shaped internal order", async () => {
+  const res = await fetch(`${BASE}/api/demo-order`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ returnTo: "/factory-run" }),
+  })
+  assert.equal(res.status, 200)
+
+  const orders = dataFile("orders.json") as {
+    clientName: string; serviceId?: string; serviceName?: string; status: string; deliverableId?: string
+  }[]
+  const hvac = orders.find((o) => o.clientName === "HVAC TestCo")!
+  assert.ok(hvac, "demo order must exist")
+  assert.equal(hvac.serviceId, "svc-ai-workflow-audit")
+  assert.equal(hvac.status, "ready_for_review")
+  assert.ok(hvac.deliverableId)
+
+  // Output is shaped by the service, not a generic template
+  const digitals = dataFile("daily-digitals.json") as { id: string; content: string }[]
+  const out = digitals.find((d) => d.id === hvac.deliverableId)!
+  assert.ok(out.content.includes("Workflow Diagnosis"))
+  assert.ok(out.content.includes("Proposed Mini Demo"))
+  assert.ok(out.content.includes("HVAC TestCo"))
+
+  // /admin shows the service name for the client order
+  const admin = await (await fetch(`${BASE}/admin`)).text()
+  assert.match(admin, /AI Workflow Audit \+ Mini Demo/)
+  assert.match(admin, /HVAC TestCo/)
+
+  // Duplicate protection: second click does not create a second active demo
+  await fetch(`${BASE}/api/demo-order`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ returnTo: "/factory-run" }),
+  })
+  const after = (dataFile("orders.json") as { clientName: string }[]).filter((o) => o.clientName === "HVAC TestCo")
+  assert.equal(after.length, 1, "demo order must not duplicate while active")
+})
+
+test("delivery pack flow: approve output → pack draft → approve → warehouse → case record", async () => {
+  const orders = dataFile("orders.json") as { clientName: string; id: string; deliverableId?: string }[]
+  const hvac = orders.find((o) => o.clientName === "HVAC TestCo")!
+
+  // Approve → create pack (single operator action)
+  const create = await fetch(`${BASE}/api/delivery`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "create", outputId: hvac.deliverableId! }),
+  })
+  assert.equal(create.status, 200)
+
+  let packs = dataFile("delivery-packs.json") as {
+    id: string; status: string; clientName: string; serviceName: string
+    sourceOutputId: string; orderId: string; recommendations: string[]; nextSteps: string[]
+  }[]
+  assert.equal(packs.length, 1)
+  const pack = packs[0]!
+  assert.equal(pack.status, "draft")
+  assert.equal(pack.clientName, "HVAC TestCo")
+  assert.equal(pack.serviceName, "AI Workflow Audit + Mini Demo")
+  assert.equal(pack.sourceOutputId, hvac.deliverableId)
+  assert.ok(pack.recommendations.length >= 3)
+  assert.ok(pack.nextSteps.length >= 1)
+
+  // The source order is now approved; its output sits in the warehouse
+  const hvacAfter = (dataFile("orders.json") as { id: string; status: string }[]).find((o) => o.id === hvac.id)!
+  assert.equal(hvacAfter.status, "approved")
+
+  // /delivery renders the pack with client-usable markdown
+  const deliveryPage = await (await fetch(`${BASE}/delivery`)).text()
+  assert.match(deliveryPage, /HVAC TestCo/)
+  assert.match(deliveryPage, /## Recommendations/)
+  assert.match(deliveryPage, /## Next Steps/)
+  assert.match(deliveryPage, /Approve Pack/)
+
+  // Approve the pack
+  const approve = await fetch(`${BASE}/api/delivery`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "approve", id: pack.id }),
+  })
+  assert.equal(approve.status, 200)
+  packs = dataFile("delivery-packs.json") as typeof packs
+  assert.equal(packs[0]!.status, "approved")
+
+  // Warehouse the pack → case record
+  const wh = await fetch(`${BASE}/api/delivery`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "warehouse", id: pack.id }),
+  })
+  assert.equal(wh.status, 200)
+  packs = dataFile("delivery-packs.json") as typeof packs
+  assert.equal(packs[0]!.status, "warehouse_ready")
+
+  const cases = dataFile("case-records.json") as { clientName: string; deliveryPackId: string; followUpSuggestion: string }[]
+  assert.equal(cases.length, 1)
+  assert.equal(cases[0]!.clientName, "HVAC TestCo")
+  assert.equal(cases[0]!.deliveryPackId, pack.id)
+  assert.ok(cases[0]!.followUpSuggestion.length > 10)
+
+  // Warehouse page shows the client-ready artifact
+  const warehouse = await (await fetch(`${BASE}/warehouse`)).text()
+  assert.match(warehouse, /Delivery Packs \(1\)/)
+  assert.match(warehouse, /warehouse_ready/)
+
+  // /api/delivery-packs is read-only and reflects the loop
+  const files = ["orders.json", "delivery-packs.json", "case-records.json", "events.json", "work-runs.json"]
+  const before = files.map((name) => [name, rawDataFile(name)])
+  const api = (await (await fetch(`${BASE}/api/delivery-packs`)).json()) as { total: number; caseRecords: unknown[] }
+  assert.equal(api.total, 1)
+  assert.equal(api.caseRecords.length, 1)
+  const afterFiles = files.map((name) => [name, rawDataFile(name)])
+  assert.deepEqual(afterFiles, before, "GET /api/delivery-packs must not mutate the store")
+})
+
 test("paused autopilot remains paused after a real server restart", async () => {
   // Clear the ready order first so the paused state has ONLY training drafts
   // pending — the exact scenario where "resume autopilot" would be misleading.
@@ -313,8 +479,8 @@ test("paused autopilot remains paused after a real server restart", async () => 
   assert.match(adminAfter, /autopilot OFF/, "admin cockpit must show the persisted OFF state")
   assert.match(adminAfter, /Factory is paused because autopilot is OFF/, "standing-still reason must explain the pause")
   // Boss header must survive the restart from persisted work runs, not an
-  // in-memory summary string: last run before restart was the rework cycle.
-  assert.match(adminAfter, /last cycle: REWORK_MODE · completed · via daily_run/)
+  // in-memory summary string: last run before restart was the demo-order cycle.
+  assert.match(adminAfter, /last cycle: CLIENT_MODE · completed · via order_created/)
   assert.doesNotMatch(adminAfter, /none recorded yet/)
   assert.equal((dataFile("settings.json") as { autopilotEnabled: boolean }).autopilotEnabled, false)
 

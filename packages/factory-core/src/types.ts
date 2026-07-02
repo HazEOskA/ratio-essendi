@@ -184,9 +184,26 @@ export type FeedbackEvent = {
   nextRevisionTaskId?: string
 }
 
+// --- Service catalog (what the factory sells) ---
+
+export type ServiceDefinition = {
+  id: string
+  name: string
+  targetCustomer: string
+  promise: string
+  inputsRequired: string[]
+  expectedDeliverables: string[]
+  defaultDepartment: DailyDigitalDepartment
+  defaultTaskType: string
+  reviewSteps: string[]
+  safetyNotes: string
+}
+
 // --- Client orders (real work) ---
 
 export type OrderStatus = "new" | "in_production" | "ready_for_review" | "approved" | "rejected" | "closed"
+
+export type OrderLanguage = "PL" | "EN"
 
 export type ClientOrder = {
   id: string
@@ -194,6 +211,11 @@ export type ClientOrder = {
   contact?: string
   description: string
   department: DailyDigitalDepartment
+  serviceId?: string
+  serviceName?: string
+  urgency?: "normal" | "high"
+  language?: OrderLanguage
+  operatorNotes?: string
   taskType?: string
   status: OrderStatus
   deliverableId?: string
@@ -201,6 +223,44 @@ export type ClientOrder = {
   revisionCount: number
   createdAt: string
   updatedAt: string
+}
+
+// --- Delivery pack: the client-ready artifact (internal until operator delivers) ---
+
+export type DeliveryPackStatus = "draft" | "approved" | "warehouse_ready"
+
+export type DeliveryPack = {
+  id: string
+  orderId: string
+  sourceOutputId: string
+  clientName: string
+  serviceId?: string
+  serviceName: string
+  date: string
+  executiveSummary: string
+  mainDeliverable: string
+  recommendations: string[]
+  nextSteps: string[]
+  safetyNote: string
+  status: DeliveryPackStatus
+  revisionCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+// --- Case record: business memory after a pack is warehoused ---
+
+export type CaseRecord = {
+  id: string
+  clientName: string
+  serviceId?: string
+  serviceName: string
+  problem: string
+  outputSummary: string
+  status: "closed_ready"
+  createdAt: string
+  deliveryPackId: string
+  followUpSuggestion: string
 }
 
 // --- Autonomous cycle ---
@@ -260,4 +320,6 @@ export type FactoryState = {
   feedbackEvents: FeedbackEvent[]
   orders: ClientOrder[]
   workRuns: FactoryWorkRun[]
+  deliveryPacks: DeliveryPack[]
+  caseRecords: CaseRecord[]
 }

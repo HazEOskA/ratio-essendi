@@ -20,6 +20,7 @@ import type {
   FactoryEvent,
 } from "./types.js"
 import type { FactoryStore } from "./store.js"
+import { getServiceDefinition, buildServiceContent } from "./services.js"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ function extractNicheFocus(constraints: string[]): string {
   return m?.[1]?.trim() ?? ""
 }
 
-function scoreContent(content: string, constraints: string[]): number {
+export function scoreContent(content: string, constraints: string[]): number {
   let s = 0
   if (content.length > 800) s += 0.3
   else if (content.length > 400) s += 0.2
@@ -1570,7 +1571,16 @@ export function regenerateDigital(store: FactoryStore, id: string): DailyDigital
   for (const fb of deptFeedback) if (!constraints.includes(fb)) constraints.push(fb)
 
   const taskType = d.taskType ?? selectTaskType(d.department)
-  const generated = generateAssetContent(d.department, taskType, d.date, constraints)
+  // Service orders regenerate through the service builder so rework never
+  // degrades a shaped deliverable back into a generic template.
+  const order = d.orderId ? store.getOrder(d.orderId) : undefined
+  const service = order?.serviceId ? getServiceDefinition(order.serviceId) : undefined
+  const generated = service && order
+    ? (() => {
+        const g = buildServiceContent(service, order, constraints)
+        return { ...g, qualityScore: scoreContent(g.content, constraints) }
+      })()
+    : generateAssetContent(d.department, taskType, d.date, constraints)
   const now = new Date().toISOString()
 
   store.updateDailyDigital(id, {

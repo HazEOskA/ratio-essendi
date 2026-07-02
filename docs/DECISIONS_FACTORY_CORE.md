@@ -75,3 +75,15 @@ The system is synchronous. Agent work cards therefore report only truthful deriv
 ## FC-019 — The Boss Header Reads Persisted History, Not Process Memory
 
 The cockpit header derives "last cycle" (mode, status, trigger, finish time) from the last persisted `FactoryWorkRun`, never from an in-memory summary string. A restart must not make the factory look like it never worked — that was the operator's core "hollow shell" complaint. The header also carries the standing safety indicators: `SAFE MODE — no external send` and `local single-instance`, because the boss should see the safety posture without reading docs. Every output card has a stable `#out-<id>` anchor; agent cards and the operator queue link to it, so "which agent produced what" is one click, not a scroll hunt.
+
+## FC-020 — Services Shape Production
+
+A client order with a `serviceId` produces a deliverable structured by that service's section list (`buildServiceContent`), not by department templates. Rework regenerates through the same builder, so operator feedback can never degrade a shaped deliverable into a generic one. Unknown service ids are rejected before any order or event is written.
+
+## FC-021 — The Delivery Pack Is the Product, and It Never Leaves Alone
+
+Approved client work converts (by explicit operator click only) into a DeliveryPack: a client-ready markdown artifact with summary, deliverable, recommendations, next steps, and a safety note. Its terminal internal status is `warehouse_ready` — the factory's job ends there. Delivery is the operator's manual act, always. Warehousing a pack writes a CaseRecord so the factory accumulates business memory.
+
+## FC-022 — Demo Orders Are Explicit and Bounded
+
+The demo path (HVAC TestCo) exists so the operator can rehearse the full loop safely. It runs only on an explicit button click, creates one internal order, refuses to duplicate while an active demo exists, and sends nothing anywhere.
