@@ -14,6 +14,8 @@ import type {
   FeedbackEvent,
   ClientOrder,
   FactoryWorkRun,
+  DeliveryPack,
+  CaseRecord,
 } from "./types.js"
 
 export class JsonStore<T> {
@@ -64,6 +66,8 @@ export class FactoryStore {
   readonly #orders: JsonStore<ClientOrder[]>
   readonly #settings: JsonStore<FactorySettings>
   readonly #workRuns: JsonStore<FactoryWorkRun[]>
+  readonly #deliveryPacks: JsonStore<DeliveryPack[]>
+  readonly #caseRecords: JsonStore<CaseRecord[]>
 
   constructor(dataDir: string) {
     const p = (name: string) => join(dataDir, `${name}.json`)
@@ -79,6 +83,8 @@ export class FactoryStore {
     this.#orders = new JsonStore(p("orders"), [])
     this.#settings = new JsonStore(p("settings"), { autopilotEnabled: true })
     this.#workRuns = new JsonStore(p("work-runs"), [])
+    this.#deliveryPacks = new JsonStore(p("delivery-packs"), [])
+    this.#caseRecords = new JsonStore(p("case-records"), [])
   }
 
   snapshot(): FactoryState {
@@ -94,6 +100,8 @@ export class FactoryStore {
       feedbackEvents: this.#feedbackEvents.read(),
       orders: this.#orders.read(),
       workRuns: this.#workRuns.read(),
+      deliveryPacks: this.#deliveryPacks.read(),
+      caseRecords: this.#caseRecords.read(),
     }
   }
 
@@ -183,6 +191,24 @@ export class FactoryStore {
   /** Orders the factory still has to produce for (client work in progress). */
   getOpenOrders(): ClientOrder[] {
     return this.#orders.read().filter((o) => o.status === "new" || o.status === "in_production")
+  }
+
+  // --- Delivery packs + case records ---
+
+  addDeliveryPack(p: DeliveryPack): void {
+    this.#deliveryPacks.update((arr) => [...arr, p])
+  }
+
+  updateDeliveryPack(id: string, patch: Partial<DeliveryPack>): void {
+    this.#deliveryPacks.update((arr) => arr.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+  }
+
+  getDeliveryPack(id: string): DeliveryPack | undefined {
+    return this.#deliveryPacks.read().find((p) => p.id === id)
+  }
+
+  addCaseRecord(c: CaseRecord): void {
+    this.#caseRecords.update((arr) => [...arr, c])
   }
 
   // --- Settings (survive restarts) ---

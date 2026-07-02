@@ -8,15 +8,20 @@
  * reviews, then delivers through their own channel.
  */
 import { randomUUID } from "node:crypto"
-import type { ClientOrder, DailyDigital, DailyDigitalDepartment } from "./types.js"
+import type { ClientOrder, DailyDigital, DailyDigitalDepartment, OrderLanguage } from "./types.js"
 import type { FactoryStore } from "./store.js"
-import { TASK_TYPES, DEPT_AGENT, generateAssetContent } from "./missions.js"
+import { TASK_TYPES, DEPT_AGENT, generateAssetContent, scoreContent } from "./missions.js"
+import { getServiceDefinition, buildServiceContent } from "./services.js"
 
 export type OrderInput = {
   clientName: string
   contact?: string
   description: string
   department: DailyDigitalDepartment
+  serviceId?: string
+  urgency?: "normal" | "high"
+  language?: OrderLanguage
+  operatorNotes?: string
 }
 
 /** Maps free-text order descriptions to a concrete task type per department. */
@@ -67,14 +72,25 @@ export function inferTaskType(dept: DailyDigitalDepartment, description: string)
 }
 
 export function createOrder(store: FactoryStore, input: OrderInput): ClientOrder {
+  // A named service overrides routing: unknown service ids must be rejected
+  // by the caller BEFORE this point (no order, no event on invalid input).
+  const service = input.serviceId ? getServiceDefinition(input.serviceId) : undefined
+  if (input.serviceId && !service) {
+    throw new Error(`Unknown service id: ${input.serviceId}`)
+  }
+  const department = service?.defaultDepartment ?? input.department
   const now = new Date().toISOString()
   const order: ClientOrder = {
     id: `ord-${randomUUID().slice(0, 8)}`,
     clientName: input.clientName,
     ...(input.contact ? { contact: input.contact } : {}),
     description: input.description,
-    department: input.department,
-    taskType: inferTaskType(input.department, input.description),
+    department,
+    ...(service ? { serviceId: service.id, serviceName: service.name } : {}),
+    ...(input.urgency ? { urgency: input.urgency } : {}),
+    ...(input.language ? { language: input.language } : {}),
+    ...(input.operatorNotes ? { operatorNotes: input.operatorNotes } : {}),
+    taskType: service?.defaultTaskType ?? inferTaskType(department, input.description),
     status: "new",
     revisionCount: 0,
     createdAt: now,
@@ -84,9 +100,9 @@ export function createOrder(store: FactoryStore, input: OrderInput): ClientOrder
   store.addEvent({
     id: randomUUID(),
     timestamp: now,
-    agentId: DEPT_AGENT[input.department],
+    agentId: DEPT_AGENT[department],
     eventType: "order.received",
-    detail: `${order.id} from ${input.clientName}: "${input.description.slice(0, 80)}"`,
+    detail: `${order.id} from ${input.clientName}${service ? ` [${service.name}]` : ""}: "${input.description.slice(0, 80)}"`,
   })
   return order
 }
@@ -108,8 +124,16 @@ export function produceOrderDeliverable(store: FactoryStore, orderId: string): D
   const deptFeedback = store.getRecentFeedbackConstraints(7)[order.department] ?? []
   for (const fb of deptFeedback) constraints.push(fb)
 
-  const taskType = order.taskType ?? inferTaskType(order.department, order.description)
-  const generated = generateAssetContent(order.department, taskType, today, constraints)
+  // Service-shaped production: a named service produces its own deliverable
+  // structure (audit sections, pack draft, etc.) instead of generic templates.
+  const service = order.serviceId ? getServiceDefinition(order.serviceId) : undefined
+  const taskType = order.taskType ?? service?.defaultTaskType ?? inferTaskType(order.department, order.description)
+  const generated = service
+    ? (() => {
+        const g = buildServiceContent(service, order, deptFeedback)
+        return { ...g, qualityScore: scoreContent(g.content, deptFeedback) }
+      })()
+    : generateAssetContent(order.department, taskType, today, constraints)
   const now = new Date().toISOString()
 
   const digital: DailyDigital = {

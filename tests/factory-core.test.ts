@@ -27,6 +27,13 @@ import {
   inferTaskType,
   runAutonomousCycle,
   regenerateDigital,
+  SERVICE_CATALOG,
+  getServiceDefinition,
+  isValidServiceId,
+  createDeliveryPack,
+  approveDeliveryPack,
+  warehouseDeliveryPack,
+  renderPackMarkdown,
 } from "@ratio-essendi/factory-core"
 import type { Signal, QualifiedLead, ScoredOffer } from "@ratio-essendi/factory-core"
 
@@ -660,6 +667,154 @@ test("regenerateDigital: order deliverable rework re-applies client brief and re
     assert.equal(regenerated.revisionCount, 1)
     assert.ok(regenerated.content.includes("construction"), "client brief must survive rework")
     assert.equal(store.getOrder(order.id)!.status, "ready_for_review")
+  } finally {
+    cleanup()
+  }
+})
+
+
+// 8. Service catalog + delivery packs (v0.4 business loop)
+
+test("service catalog: 6 services, all fields populated", () => {
+  assert.ok(SERVICE_CATALOG.length >= 6, `Expected >= 6 services, got ${SERVICE_CATALOG.length}`)
+  const names = SERVICE_CATALOG.map((s) => s.name)
+  for (const expected of [
+    "AI Workflow Audit + Mini Demo",
+    "Website / Landing Page Audit",
+    "Recruitment / Agency Ops Workflow Audit",
+    "Client Dashboard Concept",
+    "Social Content / Carousel Pack",
+    "Process Automation Blueprint",
+  ]) {
+    assert.ok(names.includes(expected), `Missing service: ${expected}`)
+  }
+  for (const svc of SERVICE_CATALOG) {
+    assert.ok(svc.id.startsWith("svc-"), `${svc.name}: id must be svc-*`)
+    assert.ok(svc.targetCustomer.length > 10, `${svc.id}: targetCustomer`)
+    assert.ok(svc.promise.length > 10, `${svc.id}: promise`)
+    assert.ok(svc.inputsRequired.length >= 2, `${svc.id}: inputsRequired`)
+    assert.ok(svc.expectedDeliverables.length >= 3, `${svc.id}: expectedDeliverables`)
+    assert.ok(svc.reviewSteps.length >= 1, `${svc.id}: reviewSteps`)
+    assert.ok(svc.safetyNotes.length > 10, `${svc.id}: safetyNotes`)
+    assert.ok(isValidServiceId(svc.id))
+  }
+  assert.equal(isValidServiceId("svc-nonexistent"), false)
+})
+
+test("service order: routing from service, production shaped by service", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const order = createOrder(store, {
+      clientName: "HVAC TestCo",
+      department: "sales", // service default (delivery) must override this
+      serviceId: "svc-ai-workflow-audit",
+      language: "EN",
+      description: "We install and maintain HVAC systems. We need a simple workflow for inbound leads, quote follow-ups, and maintenance plan objections.",
+    })
+    assert.equal(order.department, getServiceDefinition("svc-ai-workflow-audit")!.defaultDepartment)
+    assert.equal(order.serviceName, "AI Workflow Audit + Mini Demo")
+    assert.equal(order.taskType, "workflow-audit")
+
+    const deliverable = produceOrderDeliverable(store, order.id)!
+    assert.ok(deliverable.content.includes("Workflow Diagnosis"), "service section must be present")
+    assert.ok(deliverable.content.includes("3 Improvement Opportunities"))
+    assert.ok(deliverable.content.includes("Proposed Mini Demo"))
+    assert.ok(deliverable.content.includes("Delivery Pack Draft"))
+    assert.ok(deliverable.content.includes("HVAC TestCo"))
+    assert.ok(deliverable.qualityScore >= 0.75, `service output must score well, got ${deliverable.qualityScore}`)
+  } finally {
+    cleanup()
+  }
+})
+
+test("service order: unknown service id throws before any write", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    assert.throws(() => createOrder(store, {
+      clientName: "X",
+      department: "sales",
+      serviceId: "svc-nonexistent",
+      description: "whatever",
+    }))
+    const state = store.snapshot()
+    assert.equal(state.orders.length, 0)
+    assert.equal(state.events.filter((e) => e.eventType.startsWith("order.")).length, 0)
+  } finally {
+    cleanup()
+  }
+})
+
+test("delivery pack lifecycle: create -> approve -> warehouse -> case record", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const order = createOrder(store, {
+      clientName: "HVAC TestCo",
+      department: "delivery",
+      serviceId: "svc-ai-workflow-audit",
+      description: "We install HVAC systems and lose quote follow-ups.",
+    })
+    const deliverable = produceOrderDeliverable(store, order.id)!
+
+    const pack = createDeliveryPack(store, deliverable.id)!
+    assert.equal(pack.status, "draft")
+    assert.equal(pack.clientName, "HVAC TestCo")
+    assert.equal(pack.serviceName, "AI Workflow Audit + Mini Demo")
+    assert.equal(pack.sourceOutputId, deliverable.id)
+    assert.equal(pack.orderId, order.id)
+    assert.ok(pack.executiveSummary.length > 40)
+    assert.ok(pack.recommendations.length >= 3)
+    assert.ok(pack.nextSteps.length >= 1)
+    assert.ok(pack.safetyNote.length > 10)
+
+    // Idempotent: second create returns the same pack
+    assert.equal(createDeliveryPack(store, deliverable.id)!.id, pack.id)
+
+    // Markdown export is client-usable
+    const md = renderPackMarkdown(pack)
+    assert.ok(md.includes("HVAC TestCo"))
+    assert.ok(md.includes("AI Workflow Audit + Mini Demo"))
+    assert.ok(md.includes("## Recommendations"))
+    assert.ok(md.includes("## Next Steps"))
+    assert.ok(md.includes("the factory never sends"))
+
+    // Cannot warehouse a draft
+    assert.equal(warehouseDeliveryPack(store, pack.id), undefined)
+
+    const approved = approveDeliveryPack(store, pack.id)!
+    assert.equal(approved.status, "approved")
+
+    const record = warehouseDeliveryPack(store, pack.id)!
+    assert.equal(store.getDeliveryPack(pack.id)!.status, "warehouse_ready")
+    assert.equal(record.clientName, "HVAC TestCo")
+    assert.equal(record.deliveryPackId, pack.id)
+    assert.ok(record.followUpSuggestion.includes("HVAC TestCo"))
+    assert.equal(record.status, "closed_ready")
+
+    const events = store.snapshot().events.map((e) => e.eventType)
+    assert.ok(events.includes("pack.created"))
+    assert.ok(events.includes("pack.approved"))
+    assert.ok(events.includes("pack.warehoused"))
+  } finally {
+    cleanup()
+  }
+})
+
+test("service order rework keeps the service shape and applies feedback", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const order = createOrder(store, {
+      clientName: "HVAC TestCo",
+      department: "delivery",
+      serviceId: "svc-ai-workflow-audit",
+      description: "We install HVAC systems and lose quote follow-ups.",
+    })
+    const deliverable = produceOrderDeliverable(store, order.id)!
+    reworkDigital(store, deliverable.id, "Add concrete numbers for a 10-person install team")
+    const regenerated = regenerateDigital(store, deliverable.id)!
+    assert.equal(regenerated.revisionCount, 1)
+    assert.ok(regenerated.content.includes("Workflow Diagnosis"), "rework must not degrade to a generic template")
+    assert.ok(regenerated.content.includes("PRODUCTION CONSTRAINTS"))
+    assert.ok(regenerated.content.includes("10-person install team"))
   } finally {
     cleanup()
   }

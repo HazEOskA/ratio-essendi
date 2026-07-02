@@ -29,6 +29,12 @@ import {
   warehouseDigital,
   createOrder,
   runAutonomousCycle,
+  SERVICE_CATALOG,
+  isValidServiceId,
+  createDeliveryPack,
+  approveDeliveryPack,
+  warehouseDeliveryPack,
+  renderPackMarkdown,
 } from "@ratio-essendi/factory-core"
 import type {
   FactoryState,
@@ -39,6 +45,8 @@ import type {
   FactoryWorkRun,
   MissionAgentId,
   FactoryWorkRunTrigger,
+  DeliveryPack,
+  OrderLanguage,
 } from "@ratio-essendi/factory-core"
 import { randomUUID } from "node:crypto"
 
@@ -71,7 +79,9 @@ const nav = (active: string): string => {
   const links: [string, string][] = [
     ["/admin", "Admin"],
     ["/", "Factory"],
+    ["/factory-run", "Factory Run"],
     ["/orders", "Orders"],
+    ["/delivery", "Delivery"],
     ["/leads", "Leads"],
     ["/warehouse", "Warehouse"],
     ["/trash", "Trash"],
@@ -191,6 +201,15 @@ button.bad{background:#3a1418;color:#f85149;border-color:#5a1e23}
 .timeline-step{background:#070b11;border:1px solid #263241;border-left:3px solid #00f5ff;border-radius:8px;padding:10px}
 .timeline-step.failed{border-left-color:#f85149}.timeline-step.skipped{border-left-color:#8b949e}
 .idle-box{background:rgba(52,39,10,.55);border:1px solid rgba(255,184,0,.42);border-radius:8px;padding:12px;color:#f0d28a}
+.idle-box .kicker{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:#d29922;margin-bottom:4px}
+.run-drill{background:#0b1119;border:1px solid #263241;border-radius:8px;padding:8px 12px;margin-bottom:8px}
+.run-drill summary{cursor:pointer;font-size:12.5px;color:#dbe7f0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.run-drill[open]{border-color:rgba(0,245,255,.45)}
+.run-drill .drill-body{margin-top:8px;border-top:1px solid #263241;padding-top:8px}
+.wait-items{margin:8px 0 0;padding-left:18px;color:#a9b7c5;font-size:12px}
+.wait-items li{margin:3px 0}
+.wait-items a{color:#58a6ff}
+.admin-table a{color:#58a6ff;text-decoration:none}
 @media (max-width:860px){
   .admin-hero,.admin-two,.admin-safety{grid-template-columns:1fr}
   .admin-grid,.admin-three,.workroom-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -339,7 +358,23 @@ ${digitalAssets.length === 0 ? '<p class="dim">No digital assets in warehouse ye
     <span class="dim" style="font-size:12px;margin-left:8px">score: ${d.qualityScore} · rev ${d.revisionCount} · ${E(d.date)}</span>
   </div>
   <div class="offer-pre">${E(d.content)}</div>
-</div>`).join("")}`)
+</div>`).join("")}
+
+<h2>Delivery Packs (${state.deliveryPacks.length})</h2>
+${state.deliveryPacks.length === 0 ? '<p class="dim">No delivery packs yet.</p>' : `
+<table>
+<thead><tr><th>Pack</th><th>Client</th><th>Service</th><th>Status</th><th>Source</th><th>Created</th></tr></thead>
+<tbody>
+${[...state.deliveryPacks].reverse().map((p) => `<tr>
+  <td class="mono">${E(p.id)}</td>
+  <td>${E(p.clientName)}</td>
+  <td>${E(p.serviceName)}</td>
+  <td>${badge(p.status, p.status === "warehouse_ready" ? "ok" : p.status === "approved" ? "info" : "warn")}</td>
+  <td class="mono dim">${E(p.sourceOutputId)}</td>
+  <td class="dim">${E(p.createdAt.slice(0, 16).replace("T", " "))}</td>
+</tr>`).join("")}
+</tbody>
+</table>`}`)
 }
 
 function renderTrash(state: FactoryState): string {
@@ -611,6 +646,104 @@ ${orders.length === 0 ? '<p class="dim">No orders yet. When there are no orders,
 </div>`).join("")}`)
 }
 
+type OpsWaiting = {
+  ordersReadyForReview: number
+  trainingDrafts: number
+  needsRework: number
+  pendingApprovals: number
+  deliveryPacksDraft: number
+  deliveryPacksApproved: number
+}
+
+type OpsView = {
+  mode: "CLIENT_MODE" | "REWORK_MODE" | "NO_CLIENT_TRAINING_MODE" | "IDLE"
+  nextActionTitle: string
+  nextActionDetail: string
+  standingStill: string
+  waiting: OpsWaiting
+  trainingToday: number
+}
+
+/**
+ * Single source of truth for "what is the factory doing and why" — used by the
+ * admin cockpit AND the read-only debug endpoints, so page and JSON never drift.
+ */
+function deriveOps(state: FactoryState): OpsView {
+  const today = new Date().toISOString().slice(0, 10)
+  // Mirror the autopilot's own arbitration: an open order whose deliverable is
+  // flagged needs_rework is handled by the rework stage, not order production.
+  const openOrders = state.orders.filter((o) => {
+    if (o.status !== "new" && o.status !== "in_production") return false
+    const d = o.deliverableId ? state.dailyDigitals.find((x) => x.id === o.deliverableId) : undefined
+    return d?.status !== "needs_rework"
+  }).length
+  const readyOrders = state.orders.filter((o) => o.status === "ready_for_review").length
+  const trainingItems = state.dailyDigitals.filter((d) => !d.orderId)
+  const trainingToday = trainingItems.filter((d) => d.date === today).length
+  const trainingDrafts = trainingItems.filter((d) => d.status === "draft_ready").length
+  const needsRework = state.dailyDigitals.filter((d) => d.status === "needs_rework").length
+  const pendingApprovals = state.approvalQueue.filter((a) => a.status === "pending").length
+  const deliveryPacksDraft = state.deliveryPacks.filter((p) => p.status === "draft").length
+  const deliveryPacksApproved = state.deliveryPacks.filter((p) => p.status === "approved").length
+  const waiting: OpsWaiting = { ordersReadyForReview: readyOrders, trainingDrafts, needsRework, pendingApprovals, deliveryPacksDraft, deliveryPacksApproved }
+
+  const mode: OpsView["mode"] = openOrders > 0
+    ? "CLIENT_MODE"
+    : needsRework > 0
+      ? "REWORK_MODE"
+      : trainingToday < 5
+        ? "NO_CLIENT_TRAINING_MODE"
+        : "IDLE"
+
+  const s = (n: number) => (n === 1 ? "" : "s")
+  let standingStill: string
+  if (!autopilotEnabled) {
+    standingStill =
+      "Factory is paused because autopilot is OFF. It will not self-run cycles until resumed." +
+      (readyOrders + trainingDrafts > 0
+        ? ` Meanwhile ${readyOrders} client output${s(readyOrders)} and ${trainingDrafts} training draft${s(trainingDrafts)} are pending review.`
+        : "")
+  } else if (openOrders > 0) {
+    standingStill = `Factory is producing: ${openOrders} open client order${s(openOrders)} in the pipeline.`
+  } else if (needsRework > 0) {
+    standingStill = `Factory is waiting for the rework cycle to regenerate ${needsRework} flagged output${s(needsRework)}.`
+  } else if (readyOrders + trainingDrafts + pendingApprovals + deliveryPacksDraft + deliveryPacksApproved > 0) {
+    standingStill =
+      `Factory is waiting for operator review: ${readyOrders} client output${s(readyOrders)} and ${trainingDrafts} training draft${s(trainingDrafts)} are pending.` +
+      (deliveryPacksDraft + deliveryPacksApproved > 0
+        ? ` Delivery packs waiting: ${deliveryPacksDraft} draft, ${deliveryPacksApproved} approved.`
+        : "") +
+      (pendingApprovals > 0 ? ` Plus ${pendingApprovals} pipeline approval item${s(pendingApprovals)}.` : "")
+  } else if (trainingToday >= 5) {
+    standingStill = "Factory is idle because today's training quota is complete and no client orders are open."
+  } else {
+    standingStill = `Factory is idle: training quota ${trainingToday}/5 for today — run a training cycle or wait for the next autopilot tick.`
+  }
+
+  // Pending operator-review queues always outrank the paused-autopilot hint:
+  // resuming autopilot clears none of them, so telling the operator to resume
+  // while work sits at a review gate would be a misleading next action.
+  const [nextActionTitle, nextActionDetail]: [string, string] = readyOrders > 0
+    ? ["Review client order", `${readyOrders} client order${s(readyOrders)} waiting for approval, rework, or rejection.`]
+    : needsRework > 0
+      ? ["Wait for or run rework cycle", `${needsRework} item${s(needsRework)} marked needs_rework.`]
+      : trainingDrafts > 0
+        ? ["Review training assets", `${trainingDrafts} training draft${s(trainingDrafts)} ready for operator review.`]
+        : deliveryPacksDraft > 0
+          ? ["Approve delivery pack", `${deliveryPacksDraft} delivery pack${s(deliveryPacksDraft)} in draft on /delivery.`]
+          : deliveryPacksApproved > 0
+            ? ["Warehouse approved delivery pack", `${deliveryPacksApproved} approved pack${s(deliveryPacksApproved)} ready on /delivery.`]
+            : pendingApprovals > 0
+              ? ["Review pipeline approval item", `${pendingApprovals} approval item${s(pendingApprovals)} pending.`]
+              : !autopilotEnabled
+                ? ["Resume autopilot or keep paused intentionally", "The persisted autopilot setting is OFF and nothing is waiting for review."]
+                : trainingToday < 5 && openOrders === 0
+                  ? ["Run training cycle", `Today has ${trainingToday}/5 training assets.`]
+                  : ["Add a client order / system idle", "Nothing needs review. The factory is ready for new client work."]
+
+  return { mode, nextActionTitle, nextActionDetail, standingStill, waiting, trainingToday }
+}
+
 function renderAdmin(state: FactoryState, flash?: string): string {
   const today = new Date().toISOString().slice(0, 10)
   const openOrders = state.orders.filter((o) => o.status === "new" || o.status === "in_production")
@@ -627,25 +760,14 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   const trashCount = state.trash.length + state.dailyDigitals.filter((d) => d.location === "trash").length
   const pendingApprovalCount = state.approvalQueue.filter((a) => a.status === "pending").length
   const pendingReviewCount = readyOrders.length + pendingTraining.length + reworkItems.length + pendingApprovalCount
+  const packsDraft = state.deliveryPacks.filter((p) => p.status === "draft")
+  const packsApproved = state.deliveryPacks.filter((p) => p.status === "approved")
+  const packsReady = state.deliveryPacks.filter((p) => p.status === "warehouse_ready")
   const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
 
-  const mode = openOrders.length > 0
-    ? "CLIENT_MODE"
-    : todayTraining.length < 5
-      ? "NO_CLIENT_TRAINING_MODE"
-      : "IDLE"
-
-  const nextAction = readyOrders.length > 0
-    ? ["Review client order", `${readyOrders.length} client order${readyOrders.length === 1 ? "" : "s"} waiting for approval, rework, or rejection.`]
-    : reworkItems.length > 0
-      ? ["Wait for or run rework cycle", `${reworkItems.length} item${reworkItems.length === 1 ? "" : "s"} marked needs_rework.`]
-      : !autopilotEnabled
-        ? ["Resume autopilot or keep paused intentionally", "The persisted autopilot setting is OFF."]
-        : todayTraining.length < 5 && openOrders.length === 0
-          ? ["Run training cycle", `Today has ${todayTraining.length}/5 training assets.`]
-          : pendingTraining.length > 0
-            ? ["Review training assets", `${pendingTraining.length} training draft${pendingTraining.length === 1 ? "" : "s"} ready for operator review.`]
-            : ["System is idle / no urgent action", "No client order or training asset needs immediate attention."]
+  const ops = deriveOps(state)
+  const mode = ops.mode
+  const nextAction: [string, string] = [ops.nextActionTitle, ops.nextActionDetail]
 
   const orderBadgeCls = (s: ClientOrder["status"]): string => {
     if (s === "approved" || s === "closed") return "ok"
@@ -685,6 +807,12 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     <input type="hidden" name="id" value="${E(d.id)}">
     <button class="ok" type="submit">Approve -> Warehouse</button>
   </form>
+  <form method="POST" action="/api/delivery">
+    <input type="hidden" name="returnTo" value="/admin">
+    <input type="hidden" name="action" value="create">
+    <input type="hidden" name="outputId" value="${E(d.id)}">
+    <button type="submit" style="background:#0f2740;color:#58a6ff;border-color:#1c3a5e">Approve -> Delivery Pack</button>
+  </form>
   <form method="POST" action="/api/daily">
     <input type="hidden" name="returnTo" value="/admin">
     <input type="hidden" name="action" value="rework">
@@ -707,7 +835,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     const done = order.status === "approved" || order.status === "closed"
     const cls = order.status === "ready_for_review" ? "ready" : done ? "done" : order.status === "rejected" ? "bad" : ""
     return `
-<div class="admin-order ${cls}">
+<div class="admin-order ${cls}" id="${d ? `out-${E(d.id)}` : `order-${E(order.id)}`}">
   <div class="daily-header">
     ${badge(order.status, orderBadgeCls(order.status))}
     ${badge(order.department, "info")}
@@ -719,14 +847,15 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   <div style="font-size:12.5px;color:#dbe7f0">${E(order.description)}</div>
   ${d ? `
     <div class="admin-preview">${E(preview(d.content))}</div>
-    <div class="dim" style="font-size:11px;margin-top:6px">deliverable ${E(d.id)} · score ${d.qualityScore} · ${E(d.status)} · ${E(d.type)}</div>
+    <div class="dim" style="font-size:11px;margin-top:6px">deliverable ${E(d.id)} · by ${E(d.createdByAgentId)} · score ${d.qualityScore} · rev ${d.revisionCount} · ${E(d.status)} · ${E(d.taskType ?? d.type)}</div>
+    ${d.operatorFeedback ? `<div class="dim" style="font-size:12px;margin-top:4px;color:#d29922">operator feedback: ${E(d.operatorFeedback)}${d.revisionCount > 0 ? ` (applied in rev ${d.revisionCount})` : ""}</div>` : ""}
     ${renderOrderActions(d)}
   ` : '<div class="dim" style="font-size:12px;margin-top:8px">No deliverable yet.</div>'}
 </div>`
   }
 
-  const orderGroup = (title: string, items: ClientOrder[], empty: string): string => `
-<div class="admin-panel">
+  const orderGroup = (title: string, items: ClientOrder[], empty: string, anchorId?: string): string => `
+<div class="admin-panel"${anchorId ? ` id="${anchorId}"` : ""}>
   <h2>${E(title)} (${items.length})</h2>
   <div class="admin-list">
     ${items.length === 0 ? `<p class="dim">${E(empty)}</p>` : [...items].reverse().map(renderOrder).join("")}
@@ -767,15 +896,17 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   }
 
   const renderTrainingItem = (item: DailyDigital): string => `
-<div class="admin-order ${item.status === "rejected" ? "bad" : item.status === "accepted" ? "done" : item.status === "needs_rework" ? "ready" : ""}">
+<div class="admin-order ${item.status === "rejected" ? "bad" : item.status === "accepted" ? "done" : item.status === "needs_rework" ? "ready" : ""}" id="out-${E(item.id)}">
   <div class="daily-header">
     ${badge(item.status, itemBadgeCls(item.status))}
     ${badge(item.department, "info")}
+    ${badge("training", "muted")}
     <span class="daily-title">${E(item.title)}</span>
-    <span class="dim" style="font-size:11px">score ${item.qualityScore} · rev ${item.revisionCount} · ${E(item.date)}</span>
+    <span class="dim" style="font-size:11px">${E(item.taskType ?? item.type)} · by ${E(item.createdByAgentId)} · score ${item.qualityScore} · rev ${item.revisionCount} · ${E(item.date)}</span>
   </div>
+  <div class="dim mono" style="font-size:11px;margin-top:4px">output ${E(item.id)}</div>
   <div class="admin-preview">${E(preview(item.content, 300))}</div>
-  ${item.operatorFeedback ? `<div class="dim" style="font-size:12px;margin-top:6px;color:#d29922">feedback: ${E(item.operatorFeedback)}</div>` : ""}
+  ${item.operatorFeedback ? `<div class="dim" style="font-size:12px;margin-top:6px;color:#d29922">feedback: ${E(item.operatorFeedback)}${item.revisionCount > 0 ? ` (applied in rev ${item.revisionCount})` : ""}</div>` : ""}
   ${renderTrainingActions(item)}
 </div>`
 
@@ -811,35 +942,42 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     .reverse()
     .flatMap((run) => run.steps.map((step) => ({ run, step })))
   const latestStepFor = (agentId: WorkroomAgentId) => runStepPairs.find((x) => x.step.agentId === agentId)
-  const waitingOperatorCount = readyOrders.length + pendingTraining.length + pendingApprovalCount
-  const visibleIdleReason = lastRun?.idleReason
-    ?? (waitingOperatorCount > 0 ? "Factory is waiting for operator review." : "No idle cycle recorded yet.")
+  const digitalById = new Map(state.dailyDigitals.map((d) => [d.id, d]))
 
+  // Honest derived status — the system is synchronous, so an agent is never
+  // "live". It either completed work, has output waiting for review, was
+  // skipped/idle, or its run failed (blocked).
   const renderWorkAgent = (agentId: WorkroomAgentId): string => {
     const latest = latestStepFor(agentId)
     const step = latest?.step
-    const status = latest?.run.status === "failed"
-      ? "failed"
-      : step?.status === "completed"
-        ? "active"
-        : step?.status ?? "waiting"
-    const lastOutput = step?.outputId
-      ? step.outputId
-      : step?.outputSummary
-        ? preview(step.outputSummary, 90)
-        : "No output recorded yet"
+    const outputDigital = step?.outputId ? digitalById.get(step.outputId) : undefined
+    const status = !step
+      ? "idle"
+      : latest!.run.status === "failed" || step.status === "failed"
+        ? "blocked"
+        : step.status === "skipped"
+          ? "idle"
+          : outputDigital?.status === "draft_ready" || outputDigital?.status === "needs_rework"
+            ? "waiting_review"
+            : "completed"
+    const relatedOrder = outputDigital?.orderId
     const next = agentId === "N"
-      ? lastRun?.nextOperatorAction ?? nextAction[0]
-      : step?.outputId
-        ? "Waiting for operator review"
-        : "Waiting for a matching order, rework, or training slot"
+      ? nextAction[0]
+      : status === "waiting_review"
+        ? `Operator: review ${step?.outputId ?? "output"}`
+        : status === "blocked"
+          ? "Inspect the failed work run below"
+          : "Waiting for a matching order, rework, or training slot"
 
     return `
-<div class="work-agent ${status === "failed" ? "failed" : status === "active" ? "active" : "waiting"}">
+<div class="work-agent ${status === "blocked" ? "failed" : status === "waiting_review" ? "active" : "waiting"}">
   <div class="name">${E(agentId)} · ${E(agentNames[agentId])}</div>
-  <div class="meta">${E(status)}${step?.department ? ` · ${E(step.department)}` : ""}</div>
+  <div class="meta">${E(status)}${step?.department ? ` · ${E(step.department)}` : ""}${step ? ` · last run ${E(step.finishedAt.slice(0, 19).replace("T", " "))}` : ""}</div>
   <div class="line"><strong>Last job:</strong> ${E(step?.jobType ?? "none yet")}</div>
-  <div class="line"><strong>Last output:</strong> ${E(lastOutput)}</div>
+  <div class="line"><strong>Last input:</strong> ${step ? E(preview(step.inputSummary, 110)) : "—"}</div>
+  <div class="line"><strong>Last output:</strong> ${E(step?.outputSummary ? preview(step.outputSummary, 110) : "No output recorded yet")}</div>
+  ${step?.outputId ? `<div class="line mono" style="font-size:11px"><strong>Output id:</strong> <a href="#out-${E(step.outputId)}">${E(step.outputId)}</a></div>` : ""}
+  ${relatedOrder ? `<div class="line mono" style="font-size:11px"><strong>Related order:</strong> ${E(relatedOrder)}</div>` : ""}
   <div class="line"><strong>Next:</strong> ${E(next)}</div>
 </div>`
   }
@@ -868,9 +1006,14 @@ function renderAdmin(state: FactoryState, flash?: string): string {
       <p class="admin-sub">Operational control for factory-core v0.2.1. Autonomy of thinking without autonomy of action: the system can produce internal work, but the operator approves every external step.</p>
     </div>
     <div class="admin-mode">
-      ${badge(mode, mode === "CLIENT_MODE" ? "warn" : mode === "NO_CLIENT_TRAINING_MODE" ? "info" : "muted")}
+      ${badge(mode, mode === "CLIENT_MODE" ? "warn" : mode === "REWORK_MODE" ? "warn" : mode === "NO_CLIENT_TRAINING_MODE" ? "info" : "muted")}
       ${badge(autopilotEnabled ? "autopilot ON" : "autopilot OFF", autopilotEnabled ? "ok" : "bad")}
-      <span class="dim" style="font-size:12px">last cycle: ${E(lastCycleSummary)}</span>
+      ${badge("SAFE MODE — no external send", "ok")}
+      <span class="dim" style="font-size:12px">last cycle: ${lastRun
+        ? `${E(lastRun.mode)} · ${E(lastRun.status)} · via ${E(lastRun.trigger)} · ${E(lastRun.finishedAt.slice(0, 19).replace("T", " "))}`
+        : "none recorded yet"}</span>
+      <span class="dim" style="font-size:12px">next: ${E(nextAction[0])}</span>
+      <span class="dim" style="font-size:11px">local single-instance · nothing leaves the factory without operator approval</span>
     </div>
   </section>
 
@@ -887,6 +1030,14 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     <div class="admin-card"><div class="v info">${state.events.length}</div><div class="l">Total events</div></div>
   </section>
 
+  <section class="admin-grid" aria-label="Business Loop">
+    <div class="admin-card"><div class="v info">${SERVICE_CATALOG.length}</div><div class="l">Services in catalog</div></div>
+    <div class="admin-card"><div class="v ${openOrders.length + readyOrders.length ? "warn" : "ok"}">${openOrders.length + readyOrders.length}</div><div class="l">Active client orders</div></div>
+    <div class="admin-card"><div class="v ${packsDraft.length + packsApproved.length ? "warn" : "ok"}">${packsDraft.length}/${packsApproved.length}/${packsReady.length}</div><div class="l">Packs draft/appr/ready</div></div>
+    <div class="admin-card"><div class="v info">${todayTraining.length}/5</div><div class="l">Training quota</div></div>
+    <div class="admin-card"><div class="v ok">${state.caseRecords.length}</div><div class="l">Case records</div></div>
+  </section>
+
   <section class="admin-action">
     <h2>Next Operator Action</h2>
     <strong>${E(nextAction[0])}</strong>
@@ -901,6 +1052,14 @@ function renderAdmin(state: FactoryState, flash?: string): string {
         <div class="admin-input-row">
           <input name="clientName" placeholder="Client name" required>
           <input name="contact" placeholder="Contact">
+          <select name="serviceId">
+            <option value="">— service: free brief —</option>
+            ${SERVICE_CATALOG.map((s) => `<option value="${E(s.id)}">${E(s.name)}</option>`).join("")}
+          </select>
+          <select name="language">
+            <option value="EN">EN</option>
+            <option value="PL">PL</option>
+          </select>
           <select name="department">
             <option value="marketing">Marketing</option>
             <option value="sales">Sales</option>
@@ -934,6 +1093,10 @@ function renderAdmin(state: FactoryState, flash?: string): string {
           <input type="hidden" name="date" value="${today}">
           <button type="submit">Run Training Cycle</button>
         </form>
+        <form method="POST" action="/api/demo-order">
+          <input type="hidden" name="returnTo" value="/admin">
+          <button type="submit">Create Demo HVAC Order</button>
+        </form>
       </div>
     </div>
   </section>
@@ -950,7 +1113,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   <section class="admin-two">
     <div class="admin-list">
       ${orderGroup("Client Orders Control - new / in_production", openOrders, "No orders currently in production.")}
-      ${orderGroup("Client Orders Control - ready_for_review", readyOrders, "No client orders waiting for review.")}
+      ${orderGroup("Client Orders Control - ready_for_review", readyOrders, "No client orders waiting for review.", "orders-review")}
     </div>
     <div class="admin-list">
       ${orderGroup("Client Orders Control - approved / closed", approvedOrders, "No approved or closed orders yet.")}
@@ -958,7 +1121,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     </div>
   </section>
 
-  <section class="admin-panel">
+  <section class="admin-panel" id="training-review">
     <h2>Daily Training Review</h2>
     <div class="admin-three" style="margin-bottom:10px">
       <div class="stat"><div class="v info">${todayTraining.length}/5</div><div class="l">today</div></div>
@@ -981,8 +1144,10 @@ function renderAdmin(state: FactoryState, flash?: string): string {
       <div class="stat"><div class="v warn">${lastRun?.steps.length ?? 0}</div><div class="l">Agent steps</div></div>
     </div>
     <div class="idle-box" style="margin-bottom:10px">
-      <strong>${E(visibleIdleReason)}</strong>
-      <div class="dim" style="font-size:12px;margin-top:4px">Next operator action: ${E(lastRun?.nextOperatorAction ?? nextAction[0])}</div>
+      <div class="kicker">Why It Is Standing Still</div>
+      <strong>${E(ops.standingStill)}</strong>
+      ${lastRun?.idleReason ? `<div class="dim" style="font-size:11.5px;margin-top:4px">Last recorded cycle said: ${E(lastRun.idleReason)}</div>` : ""}
+      <div class="dim" style="font-size:12px;margin-top:4px">Next operator action: ${E(nextAction[0])} — ${E(nextAction[1])}</div>
     </div>
     <div class="workroom-grid" style="margin-bottom:12px">
       ${workroomAgents.map(renderWorkAgent).join("")}
@@ -997,33 +1162,113 @@ function renderAdmin(state: FactoryState, flash?: string): string {
       </div>
       <div class="admin-subpanel">
         <h2>Waiting for Operator</h2>
-        <p class="dim" style="font-size:12px;margin-bottom:8px">${waitingOperatorCount > 0 ? "Factory is waiting for operator review." : "No operator review blocker right now."}</p>
+        <p class="dim" style="font-size:12px;margin-bottom:8px">${E(ops.standingStill)}</p>
         <table class="admin-table">
           <tbody>
-            <tr><th>Client orders ready for review</th><td>${readyOrders.length}</td></tr>
-            <tr><th>Training drafts waiting</th><td>${pendingTraining.length}</td></tr>
-            <tr><th>Reworks waiting</th><td>${reworkItems.length}</td></tr>
-            <tr><th>Pipeline approval items</th><td>${pendingApprovalCount}</td></tr>
+            <tr><th><a href="#orders-review">Client orders ready for review</a></th><td>${readyOrders.length}</td></tr>
+            <tr><th><a href="#training-review">Training drafts waiting</a></th><td>${pendingTraining.length}</td></tr>
+            <tr><th><a href="#training-review">Reworks waiting for cycle</a></th><td>${reworkItems.length}</td></tr>
+            <tr><th>Pipeline approval items (see /factory)</th><td>${pendingApprovalCount}</td></tr>
           </tbody>
         </table>
+        ${readyOrders.length + pendingTraining.length + reworkItems.length + packsDraft.length + packsApproved.length > 0 ? `
+        <table class="admin-table" style="margin-top:10px">
+          <thead><tr><th>Item</th><th>Output</th><th>Source</th><th>Producer</th><th>Dept</th><th>Score</th><th>Rev</th><th>Next safe action</th></tr></thead>
+          <tbody>
+            ${readyOrders.map((o) => {
+              const d = deliverableFor(o)
+              return `<tr>
+                <td>${E(o.clientName)}</td>
+                <td class="mono">${d ? `<a href="#out-${E(d.id)}">${E(d.id)}</a>` : "—"}</td>
+                <td>${badge("client", "warn")}</td>
+                <td class="mono">${E(d?.createdByAgentId ?? "—")}</td>
+                <td>${E(o.department)}</td>
+                <td class="mono">${d?.qualityScore ?? "—"}</td>
+                <td class="mono">${d?.revisionCount ?? 0}</td>
+                <td class="dim" style="font-size:11.5px"><a href="#${d ? `out-${E(d.id)}` : "orders-review"}">Approve → Warehouse · Rework · Reject</a></td>
+              </tr>`
+            }).join("")}
+            ${pendingTraining.slice(0, 8).map((d) => `<tr>
+                <td>${E(preview(d.title, 46))}</td>
+                <td class="mono"><a href="#out-${E(d.id)}">${E(d.id)}</a></td>
+                <td>${badge("training", "muted")}</td>
+                <td class="mono">${E(d.createdByAgentId)}</td>
+                <td>${E(d.department)}</td>
+                <td class="mono">${d.qualityScore}</td>
+                <td class="mono">${d.revisionCount}</td>
+                <td class="dim" style="font-size:11.5px"><a href="#out-${E(d.id)}">Accept · Warehouse · Rework · Reject</a></td>
+              </tr>`).join("")}
+            ${reworkItems.map((d) => `<tr>
+                <td>${E(preview(d.title, 46))}</td>
+                <td class="mono"><a href="#out-${E(d.id)}">${E(d.id)}</a></td>
+                <td>${badge("rework", "warn")}</td>
+                <td class="mono">${E(d.createdByAgentId)}</td>
+                <td>${E(d.department)}</td>
+                <td class="mono">${d.qualityScore}</td>
+                <td class="mono">${d.revisionCount}</td>
+                <td class="dim" style="font-size:11.5px">Regenerates on next cycle — use "Run Training Cycle"</td>
+              </tr>`).join("")}
+            ${packsDraft.map((p) => `<tr>
+                <td>${E(p.clientName)}</td>
+                <td class="mono"><a href="/delivery#pack-${E(p.id)}">${E(p.id)}</a></td>
+                <td>${badge("pack draft", "info")}</td>
+                <td class="mono">—</td>
+                <td>${E(p.serviceName)}</td>
+                <td class="mono">—</td>
+                <td class="mono">${p.revisionCount}</td>
+                <td class="dim" style="font-size:11.5px"><a href="/delivery#pack-${E(p.id)}">Approve pack on /delivery</a></td>
+              </tr>`).join("")}
+            ${packsApproved.map((p) => `<tr>
+                <td>${E(p.clientName)}</td>
+                <td class="mono"><a href="/delivery#pack-${E(p.id)}">${E(p.id)}</a></td>
+                <td>${badge("pack approved", "ok")}</td>
+                <td class="mono">—</td>
+                <td>${E(p.serviceName)}</td>
+                <td class="mono">—</td>
+                <td class="mono">${p.revisionCount}</td>
+                <td class="dim" style="font-size:11.5px"><a href="/delivery#pack-${E(p.id)}">Warehouse pack on /delivery</a></td>
+              </tr>`).join("")}
+          </tbody>
+        </table>` : ""}
       </div>
     </div>
   </section>
 
   <section class="admin-panel">
     <h2>Recent Work Runs</h2>
-    ${recentRuns.length === 0 ? '<p class="dim">No work runs recorded yet.</p>' : `
+    <p class="dim" style="font-size:12px;margin-bottom:8px">Click a run to inspect every agent step: input, output, constraints, timing.</p>
+    ${recentRuns.length === 0 ? '<p class="dim">No work runs recorded yet.</p>' : recentRuns.map((run, i) => `
+    <details class="run-drill"${i === 0 ? " open" : ""}>
+      <summary>
+        <span class="mono dim">${E(run.id)}</span>
+        ${badge(run.mode, run.mode === "IDLE" ? "muted" : run.mode === "REWORK_MODE" ? "warn" : "info")}
+        ${badge(run.status, run.status === "failed" ? "bad" : "ok")}
+        <span class="dim" style="font-size:11.5px">trigger: ${E(run.trigger)} · ${E(run.startedAt.slice(0, 19).replace("T", " "))} -> ${E(run.finishedAt.slice(11, 19))} · ${run.steps.length} step${run.steps.length === 1 ? "" : "s"} · ${run.outputsCreated.length} output${run.outputsCreated.length === 1 ? "" : "s"}</span>
+      </summary>
+      <div class="drill-body">
+        ${run.idleReason ? `<div class="dim" style="font-size:12px">Idle reason: ${E(run.idleReason)}</div>` : ""}
+        <div class="dim" style="font-size:12px">Next operator action: ${E(run.nextOperatorAction)}</div>
+        ${run.outputsCreated.length ? `<div class="dim mono" style="font-size:11px;margin-top:4px">Outputs created: ${run.outputsCreated.map((o) => E(o)).join(", ")}</div>` : ""}
+        <div class="timeline">${run.steps.map(renderStep).join("")}</div>
+      </div>
+    </details>`).join("")}
+  </section>
+
+  <section class="admin-panel">
+    <h2>Delivery Packs</h2>
+    <p class="dim" style="font-size:12px;margin-bottom:8px">Client-ready artifacts. The operator delivers them manually — the factory never sends. Full view: <a href="/delivery" style="color:#58a6ff">/delivery</a></p>
+    ${state.deliveryPacks.length === 0 ? '<p class="dim">No delivery packs yet. Use "Approve -> Delivery Pack" on a client output.</p>' : `
     <table class="admin-table">
-      <thead><tr><th>Run</th><th>Started</th><th>Mode</th><th>Trigger</th><th>Steps</th><th>Outputs</th><th>Next Operator Action</th></tr></thead>
+      <thead><tr><th>Pack</th><th>Client</th><th>Service</th><th>Status</th><th>Source output</th><th>Order</th><th>Created</th></tr></thead>
       <tbody>
-        ${recentRuns.map((run) => `<tr>
-          <td class="mono dim">${E(run.id)}</td>
-          <td class="mono dim">${E(run.startedAt.slice(0, 16).replace("T", " "))}</td>
-          <td>${badge(run.mode, run.mode === "IDLE" ? "muted" : run.mode === "REWORK_MODE" ? "warn" : "info")}</td>
-          <td>${E(run.trigger)}</td>
-          <td class="mono">${run.steps.length}</td>
-          <td class="mono">${run.outputsCreated.length}</td>
-          <td class="dim" style="font-size:12px">${E(run.nextOperatorAction)}</td>
+        ${[...state.deliveryPacks].reverse().slice(0, 6).map((p) => `<tr>
+          <td class="mono"><a href="/delivery#pack-${E(p.id)}">${E(p.id)}</a></td>
+          <td>${E(p.clientName)}</td>
+          <td>${E(p.serviceName)}</td>
+          <td>${badge(p.status, p.status === "warehouse_ready" ? "ok" : p.status === "approved" ? "info" : "warn")}</td>
+          <td class="mono dim">${E(p.sourceOutputId)}</td>
+          <td class="mono dim">${E(p.orderId)}</td>
+          <td class="dim">${E(p.createdAt.slice(0, 16).replace("T", " "))}</td>
         </tr>`).join("")}
       </tbody>
     </table>`}
@@ -1073,6 +1318,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
         <li>A mutex is required before async LLM calls are added to cycles.</li>
         <li>No external sending, publishing, scraping, CRM push, email, or ad spend.</li>
         <li>Operator approval is required before any asset leaves the factory.</li>
+        <li>Delivery packs are internal artifacts — the operator owns delivery, always.</li>
       </ul>
     </div>
     <div class="admin-panel">
@@ -1086,6 +1332,198 @@ function renderAdmin(state: FactoryState, flash?: string): string {
       </ul>
     </div>
   </section>
+</div>`)
+}
+
+
+function renderDelivery(state: FactoryState, flash?: string): string {
+  const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
+  const packs = [...state.deliveryPacks].reverse()
+  const statusCls = (st: DeliveryPack["status"]): string =>
+    st === "warehouse_ready" ? "ok" : st === "approved" ? "info" : "warn"
+  return layout("Delivery Packs", "/delivery", `
+<h1>Delivery Packs</h1>
+<p class="sub">Client-ready artifacts prepared by the factory. <strong style="color:#f85149">The factory never sends — the operator copies the pack and delivers manually.</strong></p>
+${flashHtml}
+${packs.length === 0 ? '<p class="dim">No packs yet. On /admin, use "Approve -> Delivery Pack" on a client output.</p>' : packs.map((p) => `
+<div class="admin-order" id="pack-${E(p.id)}">
+  <div class="daily-header">
+    ${badge(p.status, statusCls(p.status))}
+    <span class="daily-title">${E(p.serviceName)} — ${E(p.clientName)}</span>
+    <span class="mono dim" style="font-size:11px">${E(p.id)} · rev ${p.revisionCount} · ${E(p.date)}</span>
+    <span class="mono dim" style="font-size:11px">source ${E(p.sourceOutputId)} · order ${E(p.orderId)}</span>
+  </div>
+  <div class="offer-pre" style="max-height:340px">${E(renderPackMarkdown(p))}</div>
+  <div class="admin-actions" style="margin-top:8px">
+    ${p.status === "draft" ? `
+    <form method="POST" action="/api/delivery">
+      <input type="hidden" name="action" value="approve">
+      <input type="hidden" name="id" value="${E(p.id)}">
+      <button class="ok" type="submit">Approve Pack</button>
+    </form>` : ""}
+    ${p.status === "approved" ? `
+    <form method="POST" action="/api/delivery">
+      <input type="hidden" name="action" value="warehouse">
+      <input type="hidden" name="id" value="${E(p.id)}">
+      <button class="ok" type="submit">Warehouse Pack + Case Record</button>
+    </form>` : ""}
+    ${p.status === "warehouse_ready" ? `<span class="dim" style="font-size:12px">warehouse_ready — copy the markdown above and deliver through your own channel.</span>` : ""}
+  </div>
+</div>`).join("")}
+
+<h2>Case Records (${state.caseRecords.length})</h2>
+${state.caseRecords.length === 0 ? '<p class="dim">No cases yet — warehousing an approved pack creates one.</p>' : `
+<table>
+<thead><tr><th>Case</th><th>Client</th><th>Service</th><th>Problem</th><th>Pack</th><th>Follow-up</th><th>Created</th></tr></thead>
+<tbody>
+${[...state.caseRecords].reverse().map((c) => `<tr>
+  <td class="mono">${E(c.id)}</td>
+  <td>${E(c.clientName)}</td>
+  <td>${E(c.serviceName)}</td>
+  <td class="dim" style="font-size:12px">${E(c.problem.slice(0, 90))}</td>
+  <td class="mono dim">${E(c.deliveryPackId)}</td>
+  <td class="dim" style="font-size:12px">${E(c.followUpSuggestion)}</td>
+  <td class="dim">${E(c.createdAt.slice(0, 10))}</td>
+</tr>`).join("")}
+</tbody>
+</table>`}`)
+}
+
+function renderFactoryRun(state: FactoryState, flash?: string): string {
+  const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
+  const ops = deriveOps(state)
+  const latestClientOutput = [...state.dailyDigitals].reverse().find((d) => d.orderId)
+  const latestOrder = latestClientOutput?.orderId ? state.orders.find((o) => o.id === latestClientOutput.orderId) : undefined
+  const recentPacks = [...state.deliveryPacks].reverse().slice(0, 5)
+  const inputStyle = "background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:13px ui-sans-serif,sans-serif;padding:6px 10px"
+  return layout("Factory Run", "/factory-run", `
+<h1>Factory Run — one page to run the day</h1>
+<p class="sub">
+  ${badge(ops.mode, ops.mode === "IDLE" ? "muted" : "info")}
+  ${badge(autopilotEnabled ? "autopilot ON" : "autopilot OFF", autopilotEnabled ? "ok" : "bad")}
+  ${badge("SAFE MODE — no external send", "ok")}
+</p>
+${flashHtml}
+
+<div class="idle-box" style="margin-bottom:14px">
+  <div class="kicker">Why It Is Standing Still</div>
+  <strong>${E(ops.standingStill)}</strong>
+  <div class="dim" style="font-size:12px;margin-top:4px">Next operator action: ${E(ops.nextActionTitle)} — ${E(ops.nextActionDetail)}</div>
+</div>
+
+<h2>Service Catalog (${SERVICE_CATALOG.length})</h2>
+<table>
+<thead><tr><th>Service</th><th>For</th><th>Promise</th><th>Dept</th><th>Deliverables</th></tr></thead>
+<tbody>
+${SERVICE_CATALOG.map((sv) => `<tr>
+  <td><strong>${E(sv.name)}</strong><br><span class="mono dim" style="font-size:10.5px">${E(sv.id)}</span></td>
+  <td class="dim" style="font-size:12px">${E(sv.targetCustomer)}</td>
+  <td class="dim" style="font-size:12px">${E(sv.promise)}</td>
+  <td>${badge(sv.defaultDepartment, "info")}</td>
+  <td class="dim" style="font-size:11.5px">${E(sv.expectedDeliverables.join(" · "))}</td>
+</tr>`).join("")}
+</tbody>
+</table>
+
+<div class="form-card">
+  <label>New client order — pick a service, describe the client's situation</label>
+  <form method="POST" action="/api/order">
+    <input type="hidden" name="returnTo" value="/factory-run">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <input name="clientName" placeholder="Client name / company" required style="flex:1;min-width:170px;${inputStyle}">
+      <select name="serviceId" style="${inputStyle}">
+        <option value="">— service: free brief —</option>
+        ${SERVICE_CATALOG.map((sv) => `<option value="${E(sv.id)}">${E(sv.name)}</option>`).join("")}
+      </select>
+      <select name="department" style="${inputStyle}">
+        <option value="marketing">Marketing</option>
+        <option value="sales">Sales</option>
+        <option value="delivery" selected>Delivery</option>
+        <option value="research">Research</option>
+        <option value="qa">QA</option>
+      </select>
+      <select name="language" style="${inputStyle}">
+        <option value="EN">EN</option>
+        <option value="PL">PL</option>
+      </select>
+      <select name="urgency" style="${inputStyle}">
+        <option value="normal">normal</option>
+        <option value="high">high</option>
+      </select>
+    </div>
+    <textarea name="description" placeholder="Client brief — what do they do, what hurts, what should the output achieve..." required></textarea>
+    <input name="operatorNotes" placeholder="Operator notes (optional)" style="width:100%;margin-top:8px;${inputStyle}">
+    <div style="margin-top:8px"><button type="submit">Accept Order -> Produce Now</button></div>
+  </form>
+  <form method="POST" action="/api/demo-order" style="margin-top:10px">
+    <input type="hidden" name="returnTo" value="/factory-run">
+    <button type="submit">Create Demo Order (HVAC TestCo — AI Workflow Audit + Mini Demo)</button>
+  </form>
+</div>
+
+<h2>Review Queue</h2>
+<table>
+<tbody>
+  <tr><th>Client outputs ready for review</th><td>${ops.waiting.ordersReadyForReview}</td></tr>
+  <tr><th>Training drafts waiting</th><td>${ops.waiting.trainingDrafts}</td></tr>
+  <tr><th>Reworks waiting for cycle</th><td>${ops.waiting.needsRework}</td></tr>
+  <tr><th>Delivery packs (draft / approved)</th><td>${ops.waiting.deliveryPacksDraft} / ${ops.waiting.deliveryPacksApproved}</td></tr>
+</tbody>
+</table>
+<p class="dim" style="font-size:12px">Full review controls live on <a href="/admin" style="color:#58a6ff">/admin</a> and <a href="/delivery" style="color:#58a6ff">/delivery</a>.</p>
+
+<h2>Latest Client Output</h2>
+${latestClientOutput ? `
+<div class="admin-order" id="out-${E(latestClientOutput.id)}">
+  <div class="daily-header">
+    ${badge(latestClientOutput.status, latestClientOutput.status === "draft_ready" ? "warn" : "ok")}
+    <span class="daily-title">${E(latestClientOutput.title)}</span>
+    <span class="mono dim" style="font-size:11px">${E(latestClientOutput.id)} · by ${E(latestClientOutput.createdByAgentId)} · rev ${latestClientOutput.revisionCount}${latestOrder?.serviceName ? ` · ${E(latestOrder.serviceName)}` : ""}</span>
+  </div>
+  <div class="offer-pre" style="max-height:260px">${E(latestClientOutput.content)}</div>
+  ${latestClientOutput.status === "draft_ready" ? `
+  <div class="admin-actions" style="margin-top:8px">
+    <form method="POST" action="/api/delivery">
+      <input type="hidden" name="returnTo" value="/factory-run">
+      <input type="hidden" name="action" value="create">
+      <input type="hidden" name="outputId" value="${E(latestClientOutput.id)}">
+      <button class="ok" type="submit">Approve -> Delivery Pack</button>
+    </form>
+    <form method="POST" action="/api/daily">
+      <input type="hidden" name="returnTo" value="/factory-run">
+      <input type="hidden" name="action" value="rework">
+      <input type="hidden" name="id" value="${E(latestClientOutput.id)}">
+      <input name="feedback" placeholder="Rework note..." required>
+      <button type="submit" style="background:#34270a;color:#d29922;border-color:#4d3c14">Request Rework</button>
+    </form>
+  </div>` : ""}
+</div>` : '<p class="dim">No client output yet — add an order above or create the demo order.</p>'}
+
+<h2>Delivery Pack Readiness</h2>
+${recentPacks.length === 0 ? '<p class="dim">No packs yet.</p>' : `
+<table>
+<thead><tr><th>Pack</th><th>Client</th><th>Service</th><th>Status</th></tr></thead>
+<tbody>
+${recentPacks.map((p) => `<tr>
+  <td class="mono"><a href="/delivery#pack-${E(p.id)}" style="color:#58a6ff">${E(p.id)}</a></td>
+  <td>${E(p.clientName)}</td>
+  <td>${E(p.serviceName)}</td>
+  <td>${badge(p.status, p.status === "warehouse_ready" ? "ok" : p.status === "approved" ? "info" : "warn")}</td>
+</tr>`).join("")}
+</tbody>
+</table>`}
+
+<div class="admin-actions" style="margin-top:14px">
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="returnTo" value="/factory-run">
+    <input type="hidden" name="action" value="run">
+    <button type="submit">Run Cycle Now</button>
+  </form>
+  <form method="POST" action="/api/autopilot">
+    <input type="hidden" name="returnTo" value="/factory-run">
+    <input type="hidden" name="action" value="${autopilotEnabled ? "off" : "on"}">
+    <button type="submit">${autopilotEnabled ? "Pause Autopilot" : "Resume Autopilot"}</button>
+  </form>
 </div>`)
 }
 
@@ -1169,6 +1607,81 @@ const server = createServer(async (req, res) => {
       if (url === "/daily-review") return html(res, renderDailyReview(state))
       if (url === "/orders") return html(res, renderOrders(state))
       if (url === "/admin" || url === "/operator") return html(res, renderAdmin(state))
+      if (url === "/factory-run") return html(res, renderFactoryRun(state))
+      if (url === "/delivery") return html(res, renderDelivery(state))
+
+      // Read-only debug endpoints — no store mutation, JSON only (Phase 2).
+      if (url === "/api/admin/state") {
+        const ops = deriveOps(state)
+        return json(res, {
+          generatedAt: new Date().toISOString(),
+          autopilotEnabled,
+          lastCycleSummary,
+          mode: ops.mode,
+          standingStill: ops.standingStill,
+          nextOperatorAction: { title: ops.nextActionTitle, detail: ops.nextActionDetail },
+          waiting: ops.waiting,
+          businessLoop: {
+            servicesInCatalog: SERVICE_CATALOG.length,
+            activeOrders: state.orders.filter((o) => o.status === "new" || o.status === "in_production").length,
+            ordersReadyForReview: state.orders.filter((o) => o.status === "ready_for_review").length,
+            deliveryPacks: {
+              draft: state.deliveryPacks.filter((p) => p.status === "draft").length,
+              approved: state.deliveryPacks.filter((p) => p.status === "approved").length,
+              warehouseReady: state.deliveryPacks.filter((p) => p.status === "warehouse_ready").length,
+            },
+            caseRecords: state.caseRecords.length,
+            trainingToday: `${ops.trainingToday}/5`,
+          },
+          counts: {
+            orders: state.orders.length,
+            dailyDigitals: state.dailyDigitals.length,
+            trainingToday: `${ops.trainingToday}/5`,
+            warehouseOffers: state.warehouse.length,
+            warehouseAssets: state.dailyDigitals.filter((d) => d.location === "warehouse").length,
+            trash: state.trash.length + state.dailyDigitals.filter((d) => d.location === "trash").length,
+            events: state.events.length,
+            workRuns: state.workRuns.length,
+          },
+          orders: state.orders.map((o) => ({
+            id: o.id,
+            clientName: o.clientName,
+            department: o.department,
+            taskType: o.taskType,
+            status: o.status,
+            deliverableId: o.deliverableId,
+            revisionCount: o.revisionCount,
+            updatedAt: o.updatedAt,
+          })),
+          latestWorkRun: state.workRuns[state.workRuns.length - 1] ?? null,
+          workRunsSummary: [...state.workRuns].reverse().slice(0, 10).map((r) => ({
+            id: r.id,
+            mode: r.mode,
+            status: r.status,
+            trigger: r.trigger,
+            startedAt: r.startedAt,
+            finishedAt: r.finishedAt,
+            steps: r.steps.length,
+            outputsCreated: r.outputsCreated,
+            idleReason: r.idleReason,
+            nextOperatorAction: r.nextOperatorAction,
+          })),
+        })
+      }
+      if (url === "/api/work-runs") {
+        return json(res, {
+          total: state.workRuns.length,
+          workRuns: [...state.workRuns].reverse().slice(0, 20),
+        })
+      }
+      if (url === "/api/delivery-packs") {
+        return json(res, {
+          total: state.deliveryPacks.length,
+          packs: [...state.deliveryPacks].reverse().slice(0, 20),
+          caseRecords: [...state.caseRecords].reverse().slice(0, 20),
+        })
+      }
+
       return html(res, "<h1>404</h1>", 404)
     }
 
@@ -1251,13 +1764,16 @@ const server = createServer(async (req, res) => {
       const feedback = (params["feedback"] ?? "").trim()
       const date = params["date"] ?? new Date().toISOString().slice(0, 10)
       const returnToAdmin = params["returnTo"] === "/admin"
+      const returnToRun = params["returnTo"] === "/factory-run"
 
       // Order deliverables review here too — sync the order status afterwards
       // and send the operator back to the relevant review surface.
       const digitalBefore = store.getDailyDigital(id)
       const orderId = digitalBefore?.orderId
       const respond = (flash: string) =>
-        returnToAdmin
+        returnToRun
+          ? html(res, renderFactoryRun(store.snapshot(), flash))
+          : returnToAdmin
           ? html(res, renderAdmin(store.snapshot(), flash))
           : orderId
           ? html(res, renderOrders(store.snapshot(), flash))
@@ -1309,7 +1825,16 @@ const server = createServer(async (req, res) => {
       const description = (params["description"] ?? "").trim()
       const contact = (params["contact"] ?? "").trim()
       const departmentRaw = (params["department"] ?? "delivery").trim()
+      const serviceIdRaw = (params["serviceId"] ?? "").trim()
+      const languageRaw = (params["language"] ?? "").trim().toUpperCase()
+      const urgencyRaw = (params["urgency"] ?? "").trim()
+      const operatorNotes = (params["operatorNotes"] ?? "").trim()
       const returnToAdmin = params["returnTo"] === "/admin"
+      const returnToRun = params["returnTo"] === "/factory-run"
+      // Reject unknown service ids before anything is created — no order, no event.
+      if (serviceIdRaw && !isValidServiceId(serviceIdRaw)) {
+        return json(res, { error: "invalid service", received: serviceIdRaw, allowed: SERVICE_CATALOG.map((sv) => sv.id) }, 400)
+      }
       // Reject unknown departments before anything is created — no order, no event.
       if (!(VALID_DEPARTMENTS as readonly string[]).includes(departmentRaw)) {
         if (returnToAdmin) {
@@ -1329,14 +1854,82 @@ const server = createServer(async (req, res) => {
         description,
         department,
         ...(contact ? { contact } : {}),
+        ...(serviceIdRaw ? { serviceId: serviceIdRaw } : {}),
+        ...(languageRaw === "PL" || languageRaw === "EN" ? { language: languageRaw as OrderLanguage } : {}),
+        ...(urgencyRaw === "high" ? { urgency: "high" as const } : {}),
+        ...(operatorNotes ? { operatorNotes } : {}),
       })
       // Produce immediately — the client should not wait for the next timer tick.
       const result = await runAutonomousCycle(store, undefined, "order_created")
       lastCycleSummary = `${result.mode}: orders=${result.ordersProduced.length}`
+      if (returnToRun) {
+        return html(res, renderFactoryRun(store.snapshot(), `Order ${order.id} accepted and produced — review below or on /admin.`))
+      }
       if (returnToAdmin) {
         return html(res, renderAdmin(store.snapshot(), `Order ${order.id} accepted and produced — review the deliverable below.`))
       }
       return html(res, renderOrders(store.snapshot(), `Order ${order.id} accepted and produced — review the deliverable below.`))
+    }
+
+    if (method === "POST" && url === "/api/delivery") {
+      const params = await readBody(req)
+      const action = params["action"] ?? ""
+      const returnToAdmin = params["returnTo"] === "/admin"
+      const returnToRun = params["returnTo"] === "/factory-run"
+      const respond = (flash: string) =>
+        returnToAdmin
+          ? html(res, renderAdmin(store.snapshot(), flash))
+          : returnToRun
+          ? html(res, renderFactoryRun(store.snapshot(), flash))
+          : html(res, renderDelivery(store.snapshot(), flash))
+
+      if (action === "create") {
+        const outputId = (params["outputId"] ?? "").trim()
+        const digital = store.getDailyDigital(outputId)
+        if (!digital?.orderId) return respond("Error: output not found or not a client-order deliverable.")
+        // Creating a pack from a draft deliverable IS the approval decision:
+        // route the output to the warehouse first (existing safe action),
+        // then build the pack. Everything stays internal.
+        if (digital.status === "draft_ready") {
+          warehouseDigital(store, outputId)
+          store.updateOrder(digital.orderId, { status: "approved", updatedAt: new Date().toISOString() })
+        }
+        const pack = createDeliveryPack(store, outputId)
+        return respond(pack ? `Delivery pack ${pack.id} created (draft) — review it on /delivery.` : "Error: pack could not be created.")
+      }
+      if (action === "approve") {
+        const pack = approveDeliveryPack(store, (params["id"] ?? "").trim())
+        return respond(pack ? `Pack ${pack.id} approved — warehouse it when ready.` : "Error: pack not found or not in draft.")
+      }
+      if (action === "warehouse") {
+        const record = warehouseDeliveryPack(store, (params["id"] ?? "").trim())
+        return respond(record ? `Pack warehoused — case ${record.id} recorded. The operator delivers manually.` : "Error: pack not found or not approved.")
+      }
+      return respond("Error: unknown delivery action.")
+    }
+
+    if (method === "POST" && url === "/api/demo-order") {
+      const params = await readBody(req)
+      const returnToAdmin = params["returnTo"] === "/admin"
+      // Explicit operator action only. Internal only. Never duplicated silently.
+      const existing = store.snapshot().orders.find(
+        (o) => o.clientName === "HVAC TestCo" && (o.status === "new" || o.status === "in_production" || o.status === "ready_for_review"),
+      )
+      if (existing) {
+        const flash = `Demo order ${existing.id} is already active — review it instead of duplicating.`
+        return returnToAdmin ? html(res, renderAdmin(store.snapshot(), flash)) : html(res, renderFactoryRun(store.snapshot(), flash))
+      }
+      const order = createOrder(store, {
+        clientName: "HVAC TestCo",
+        department: "delivery",
+        serviceId: "svc-ai-workflow-audit",
+        language: "EN",
+        description: "We install and maintain HVAC systems. We need a simple workflow to handle inbound leads, quote follow-ups, and maintenance plan objections.",
+      })
+      const result = await runAutonomousCycle(store, undefined, "order_created")
+      lastCycleSummary = `${result.mode}: orders=${result.ordersProduced.length}`
+      const flash = `Demo order ${order.id} created and produced — internal only, nothing was sent anywhere.`
+      return returnToAdmin ? html(res, renderAdmin(store.snapshot(), flash)) : html(res, renderFactoryRun(store.snapshot(), flash))
     }
 
     if (method === "POST" && url === "/api/autopilot") {
@@ -1351,6 +1944,9 @@ const server = createServer(async (req, res) => {
         eventType: autopilotEnabled ? "factory.autopilot_on" : "factory.autopilot_off",
         detail: `Operator turned autopilot ${autopilotEnabled ? "on" : "off"}`,
       })
+      if (params["returnTo"] === "/factory-run") {
+        return html(res, renderFactoryRun(store.snapshot(), `Autopilot ${autopilotEnabled ? "resumed" : "paused"}.`))
+      }
       if (returnToAdmin) {
         return html(res, renderAdmin(store.snapshot(), `Autopilot ${autopilotEnabled ? "resumed" : "paused"}.`))
       }
@@ -1385,6 +1981,11 @@ server.listen(PORT, () => {
   console.log(`\nFactory Core v0.2 — http://localhost:${PORT}`)
   console.log("  /admin        — boss/admin cockpit")
   console.log("  /operator     — admin cockpit alias")
+  console.log("  /api/admin/state — read-only cockpit state (JSON)")
+  console.log("  /api/work-runs   — read-only recent work runs (JSON)")
+  console.log("  /factory-run  — run the whole business loop from one page")
+  console.log("  /delivery     — delivery packs + case records")
+  console.log("  /api/delivery-packs — read-only packs + cases (JSON)")
   console.log("  / or /factory  — pipeline overview + signal form + autopilot toggle")
   console.log("  /orders        — client orders: intake, production, review")
   console.log("  /leads         — qualified leads")

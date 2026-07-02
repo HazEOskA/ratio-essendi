@@ -24,12 +24,17 @@ export type {
   FeedbackEvent,
   ClientOrder,
   OrderStatus,
+  OrderLanguage,
   FactoryMode,
   FactoryWorkRunTrigger,
   AgentWorkStepStatus,
   AgentWorkStep,
   FactoryWorkRun,
   CycleResult,
+  ServiceDefinition,
+  DeliveryPack,
+  DeliveryPackStatus,
+  CaseRecord,
 } from "./types.js"
 
 export { JsonStore, FactoryStore } from "./store.js"
@@ -50,3 +55,5 @@ export {
 export { createOrder, produceOrderDeliverable, inferTaskType } from "./orders.js"
 export type { OrderInput } from "./orders.js"
 export { runAutonomousCycle } from "./autopilot.js"
+export { SERVICE_CATALOG, getServiceDefinition, isValidServiceId, buildServiceContent } from "./services.js"
+export { createDeliveryPack, approveDeliveryPack, warehouseDeliveryPack, renderPackMarkdown } from "./packs.js"

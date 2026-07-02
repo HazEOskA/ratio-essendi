@@ -59,3 +59,31 @@ Daily training task types are selected randomly per run (not by `dayOfYear` rota
 ## FC-015 — Producers Are Registered Agents
 
 The five mission producers (MA, SA, DA, RA, QAA) are full registry members with watch/trigger/nextAction contracts, subject to the same "no dead agents" validation as pipeline agents A–N. Registry size is 19. An agent that produces output but has no contract is an audit finding, not a shortcut.
+
+## FC-016 — Cockpit State Has One Derivation
+
+`deriveOps()` in the server is the single source of truth for mode, standing-still reason, next operator action, and waiting counts. The /admin page and the read-only debug endpoints (`/api/admin/state`, `/api/work-runs`) all consume it, so the page and the JSON can never disagree. It mirrors the autopilot's own arbitration (an order whose deliverable is flagged needs_rework belongs to the rework stage, not order production).
+
+## FC-017 — Agent Cards Show Honest Derived Status, Never Fake Liveness
+
+The system is synchronous. Agent work cards therefore report only truthful derived states: `completed`, `waiting_review` (output sits at the review gate), `idle` (no matching job), `blocked` (run failed). There is no "working…" animation and no pretend-async status — see the mission constraint "do not fake live async work".
+
+## FC-018 — Debug Endpoints Are Read-Only
+
+`GET /api/admin/state` and `GET /api/work-runs` exist to verify cockpit correctness. They read a snapshot and return JSON; they perform no writes and add no external capability. Write paths remain the existing operator forms only.
+
+## FC-019 — The Boss Header Reads Persisted History, Not Process Memory
+
+The cockpit header derives "last cycle" (mode, status, trigger, finish time) from the last persisted `FactoryWorkRun`, never from an in-memory summary string. A restart must not make the factory look like it never worked — that was the operator's core "hollow shell" complaint. The header also carries the standing safety indicators: `SAFE MODE — no external send` and `local single-instance`, because the boss should see the safety posture without reading docs. Every output card has a stable `#out-<id>` anchor; agent cards and the operator queue link to it, so "which agent produced what" is one click, not a scroll hunt.
+
+## FC-020 — Services Shape Production
+
+A client order with a `serviceId` produces a deliverable structured by that service's section list (`buildServiceContent`), not by department templates. Rework regenerates through the same builder, so operator feedback can never degrade a shaped deliverable into a generic one. Unknown service ids are rejected before any order or event is written.
+
+## FC-021 — The Delivery Pack Is the Product, and It Never Leaves Alone
+
+Approved client work converts (by explicit operator click only) into a DeliveryPack: a client-ready markdown artifact with summary, deliverable, recommendations, next steps, and a safety note. Its terminal internal status is `warehouse_ready` — the factory's job ends there. Delivery is the operator's manual act, always. Warehousing a pack writes a CaseRecord so the factory accumulates business memory.
+
+## FC-022 — Demo Orders Are Explicit and Bounded
+
+The demo path (HVAC TestCo) exists so the operator can rehearse the full loop safely. It runs only on an explicit button click, creates one internal order, refuses to duplicate while an active demo exists, and sends nothing anywhere.
