@@ -267,6 +267,17 @@ test("GET /api/work-runs is read-only and returns recent runs with full steps", 
 })
 
 test("paused autopilot remains paused after a real server restart", async () => {
+  // Clear the ready order first so the paused state has ONLY training drafts
+  // pending — the exact scenario where "resume autopilot" would be misleading.
+  const orders = dataFile("orders.json") as { clientName: string; deliverableId?: string }[]
+  const goodCo = orders.find((o) => o.clientName === "GoodCo")!
+  const wh = await fetch(`${BASE}/api/daily`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "warehouse", id: goodCo.deliverableId!, returnTo: "/admin" }),
+  })
+  assert.equal(wh.status, 200)
+
   // Pause via the operator endpoint
   const off = await fetch(`${BASE}/api/autopilot`, {
     method: "POST",
@@ -288,4 +299,18 @@ test("paused autopilot remains paused after a real server restart", async () => 
   assert.match(adminAfter, /autopilot OFF/, "admin cockpit must show the persisted OFF state")
   assert.match(adminAfter, /Factory is paused because autopilot is OFF/, "standing-still reason must explain the pause")
   assert.equal((dataFile("settings.json") as { autopilotEnabled: boolean }).autopilotEnabled, false)
+
+  // Paused + drafts pending: next action must point at the review queue, NOT
+  // at resuming autopilot (resuming clears nothing at the review gate).
+  assert.match(adminAfter, /Review training assets/)
+  const state = (await (await fetch(`${BASE}/api/admin/state`)).json()) as {
+    autopilotEnabled: boolean
+    nextOperatorAction: { title: string }
+    waiting: { trainingDrafts: number; ordersReadyForReview: number }
+  }
+  assert.equal(state.autopilotEnabled, false)
+  assert.equal(state.waiting.ordersReadyForReview, 0)
+  assert.ok(state.waiting.trainingDrafts >= 1)
+  assert.equal(state.nextOperatorAction.title, "Review training assets",
+    "paused autopilot must not outrank pending review queues")
 })

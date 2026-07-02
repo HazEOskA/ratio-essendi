@@ -687,18 +687,21 @@ function deriveOps(state: FactoryState): OpsView {
     standingStill = `Factory is idle: training quota ${trainingToday}/5 for today — run a training cycle or wait for the next autopilot tick.`
   }
 
+  // Pending operator-review queues always outrank the paused-autopilot hint:
+  // resuming autopilot clears none of them, so telling the operator to resume
+  // while work sits at a review gate would be a misleading next action.
   const [nextActionTitle, nextActionDetail]: [string, string] = readyOrders > 0
     ? ["Review client order", `${readyOrders} client order${s(readyOrders)} waiting for approval, rework, or rejection.`]
     : needsRework > 0
       ? ["Wait for or run rework cycle", `${needsRework} item${s(needsRework)} marked needs_rework.`]
-      : !autopilotEnabled
-        ? ["Resume autopilot or keep paused intentionally", "The persisted autopilot setting is OFF."]
-        : trainingToday < 5 && openOrders === 0
-          ? ["Run training cycle", `Today has ${trainingToday}/5 training assets.`]
-          : trainingDrafts > 0
-            ? ["Review training assets", `${trainingDrafts} training draft${s(trainingDrafts)} ready for operator review.`]
-            : pendingApprovals > 0
-              ? ["Review pipeline approval item", `${pendingApprovals} approval item${s(pendingApprovals)} pending.`]
+      : trainingDrafts > 0
+        ? ["Review training assets", `${trainingDrafts} training draft${s(trainingDrafts)} ready for operator review.`]
+        : pendingApprovals > 0
+          ? ["Review pipeline approval item", `${pendingApprovals} approval item${s(pendingApprovals)} pending.`]
+          : !autopilotEnabled
+            ? ["Resume autopilot or keep paused intentionally", "The persisted autopilot setting is OFF and nothing is waiting for review."]
+            : trainingToday < 5 && openOrders === 0
+              ? ["Run training cycle", `Today has ${trainingToday}/5 training assets.`]
               : ["System is idle / no urgent action", "No client order or training asset needs immediate attention."]
 
   return { mode, nextActionTitle, nextActionDetail, standingStill, waiting, trainingToday }
