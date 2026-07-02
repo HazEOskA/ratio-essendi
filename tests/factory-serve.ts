@@ -2,6 +2,8 @@
  * Factory Core v0.1 — Operator Dashboard (port 7778)
  *
  * Pages:
+ *   GET /admin        → boss/operator command center
+ *   GET /operator     → /admin alias
  *   GET /              → /factory       — pipeline overview + signal input form
  *   GET /leads         → qualified leads
  *   GET /warehouse     → approved offers
@@ -64,6 +66,7 @@ const badge = (text: string, cls: string): string =>
 
 const nav = (active: string): string => {
   const links: [string, string][] = [
+    ["/admin", "Admin"],
     ["/", "Factory"],
     ["/orders", "Orders"],
     ["/leads", "Leads"],
@@ -139,6 +142,51 @@ button.bad{background:#3a1418;color:#f85149;border-color:#5a1e23}
 .agent-card .arole{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
 .agent-card .afield{font-size:11.5px;color:#8b949e;margin-top:2px}
 .agent-card .afield span{color:#c9d1d9}
+.admin-shell{position:relative;display:flex;flex-direction:column;gap:14px}
+.admin-shell:before{content:"";position:absolute;inset:-18px -16px auto;height:220px;background:linear-gradient(135deg,rgba(255,45,209,.16),rgba(0,245,255,.12) 46%,rgba(255,184,0,.08));filter:blur(18px);opacity:.75;pointer-events:none}
+.admin-hero,.admin-panel,.admin-card,.admin-action{position:relative;background:rgba(13,17,23,.88);border:1px solid rgba(0,245,255,.28);box-shadow:0 0 0 1px rgba(255,45,209,.08),0 18px 46px rgba(0,0,0,.28)}
+.admin-hero{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(230px,.65fr);gap:18px;border-radius:8px;padding:18px;overflow:hidden}
+.admin-hero:after{content:"OSA//CTRL";position:absolute;right:14px;top:8px;color:rgba(255,45,209,.18);font:800 44px/1 ui-monospace,monospace;letter-spacing:4px;transform:rotate(-4deg)}
+.admin-kicker{color:#00f5ff;font:700 11px/1 ui-monospace,monospace;letter-spacing:1.8px;text-transform:uppercase;margin-bottom:8px}
+.admin-title{font-size:30px;line-height:1.05;font-weight:800;margin:0 0 8px;color:#f5fbff;text-shadow:0 0 22px rgba(0,245,255,.24)}
+.admin-sub{max-width:700px;color:#a9b7c5;font-size:13px}
+.admin-mode{display:flex;flex-direction:column;gap:8px;align-items:flex-start;justify-content:flex-end}
+.admin-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.admin-card{border-radius:8px;padding:12px;min-height:86px}
+.admin-card .v{font-size:24px;font-weight:800}
+.admin-card .l{font-size:10px;color:#a9b7c5;text-transform:uppercase;letter-spacing:.7px;margin-top:2px}
+.admin-panel{border-radius:8px;padding:14px}
+.admin-panel.hot{border-color:rgba(255,184,0,.5);background:linear-gradient(135deg,rgba(52,39,10,.82),rgba(13,17,23,.92))}
+.admin-panel.danger{border-color:rgba(248,81,73,.55)}
+.admin-panel h2{margin-top:0;color:#f5fbff}
+.admin-action{border-radius:8px;padding:14px;border-color:rgba(255,45,209,.28)}
+.admin-action strong{display:block;font-size:16px;margin-bottom:4px;color:#fff}
+.admin-two{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);gap:14px}
+.admin-three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.admin-list{display:flex;flex-direction:column;gap:10px}
+.admin-order{background:#10151d;border:1px solid #273241;border-left:3px solid #00f5ff;border-radius:8px;padding:12px}
+.admin-order.ready{border-left-color:#ffb800}.admin-order.done{border-left-color:#3fb950}.admin-order.bad{border-left-color:#f85149}
+.admin-input-row{display:grid;grid-template-columns:1fr 1fr 150px;gap:8px;margin-bottom:8px}
+.admin-input-row input,.admin-input-row select,.admin-panel input,.admin-panel select{width:100%;background:#0a0f16;border:1px solid #334155;border-radius:6px;color:#e6edf3;font:13px ui-sans-serif,system-ui,sans-serif;padding:7px 10px}
+.admin-panel textarea{background:#0a0f16;border-color:#334155}
+.admin-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.admin-actions form{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start}
+.admin-actions input{background:#0a0f16;border:1px solid #334155;border-radius:6px;color:#e6edf3;font:12px ui-sans-serif,system-ui,sans-serif;padding:6px 8px;min-width:190px}
+.admin-preview{white-space:pre-wrap;background:#070b11;border:1px solid #263241;border-radius:6px;padding:9px;font-size:12px;color:#dbe7f0;max-height:180px;overflow:auto;margin-top:8px}
+.admin-table{background:rgba(10,15,22,.88)}
+.admin-safety{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.admin-safety ul{margin:0;padding-left:18px;color:#a9b7c5;font-size:12.5px}
+.admin-safety li{margin:4px 0}
+@media (max-width:860px){
+  .admin-hero,.admin-two,.admin-safety{grid-template-columns:1fr}
+  .admin-grid,.admin-three{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .admin-input-row{grid-template-columns:1fr}
+}
+@media (max-width:560px){
+  .admin-grid,.admin-three{grid-template-columns:1fr}
+  .admin-title{font-size:24px}
+  .admin-hero{padding:14px}
+}
 </style>
 </head>
 <body>
@@ -549,6 +597,364 @@ ${orders.length === 0 ? '<p class="dim">No orders yet. When there are no orders,
 </div>`).join("")}`)
 }
 
+function renderAdmin(state: FactoryState, flash?: string): string {
+  const today = new Date().toISOString().slice(0, 10)
+  const openOrders = state.orders.filter((o) => o.status === "new" || o.status === "in_production")
+  const readyOrders = state.orders.filter((o) => o.status === "ready_for_review")
+  const approvedOrders = state.orders.filter((o) => o.status === "approved" || o.status === "closed")
+  const rejectedOrders = state.orders.filter((o) => o.status === "rejected")
+  const trainingItems = state.dailyDigitals.filter((d) => !d.orderId)
+  const todayTraining = trainingItems.filter((d) => d.date === today)
+  const pendingTraining = trainingItems.filter((d) => d.status === "draft_ready")
+  const acceptedTraining = trainingItems.filter((d) => d.status === "accepted")
+  const rejectedTraining = trainingItems.filter((d) => d.status === "rejected")
+  const reworkItems = state.dailyDigitals.filter((d) => d.status === "needs_rework")
+  const warehouseAssets = state.dailyDigitals.filter((d) => d.location === "warehouse")
+  const trashCount = state.trash.length + state.dailyDigitals.filter((d) => d.location === "trash").length
+  const pendingApprovalCount = state.approvalQueue.filter((a) => a.status === "pending").length
+  const pendingReviewCount = readyOrders.length + pendingTraining.length + reworkItems.length + pendingApprovalCount
+  const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
+
+  const mode = openOrders.length > 0
+    ? "CLIENT_MODE"
+    : todayTraining.length < 5
+      ? "NO_CLIENT_TRAINING_MODE"
+      : "IDLE"
+
+  const nextAction = readyOrders.length > 0
+    ? ["Review client order", `${readyOrders.length} client order${readyOrders.length === 1 ? "" : "s"} waiting for approval, rework, or rejection.`]
+    : reworkItems.length > 0
+      ? ["Wait for or run rework cycle", `${reworkItems.length} item${reworkItems.length === 1 ? "" : "s"} marked needs_rework.`]
+      : !autopilotEnabled
+        ? ["Resume autopilot or keep paused intentionally", "The persisted autopilot setting is OFF."]
+        : todayTraining.length < 5 && openOrders.length === 0
+          ? ["Run training cycle", `Today has ${todayTraining.length}/5 training assets.`]
+          : pendingTraining.length > 0
+            ? ["Review training assets", `${pendingTraining.length} training draft${pendingTraining.length === 1 ? "" : "s"} ready for operator review.`]
+            : ["System is idle / no urgent action", "No client order or training asset needs immediate attention."]
+
+  const orderBadgeCls = (s: ClientOrder["status"]): string => {
+    if (s === "approved" || s === "closed") return "ok"
+    if (s === "ready_for_review") return "warn"
+    if (s === "rejected") return "bad"
+    return "info"
+  }
+
+  const itemBadgeCls = (s: string): string => {
+    if (s === "accepted") return "ok"
+    if (s === "needs_rework") return "warn"
+    if (s === "rejected") return "bad"
+    if (s === "draft_ready") return "info"
+    return "muted"
+  }
+
+  const eventBadgeCls = (eventType: string): string => {
+    if (/rejected|off/.test(eventType)) return "bad"
+    if (/warehouse|approved|accepted|on/.test(eventType)) return "ok"
+    if (/rework|cycle/.test(eventType)) return "warn"
+    return "info"
+  }
+
+  const preview = (text: string, max = 420): string =>
+    text.length > max ? `${text.slice(0, max)}...` : text
+
+  const deliverableFor = (order: ClientOrder): DailyDigital | undefined =>
+    order.deliverableId ? state.dailyDigitals.find((d) => d.id === order.deliverableId) : undefined
+
+  const renderOrderActions = (d?: DailyDigital): string => {
+    if (!d || d.status !== "draft_ready") return ""
+    return `
+<div class="admin-actions">
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="returnTo" value="/admin">
+    <input type="hidden" name="action" value="warehouse">
+    <input type="hidden" name="id" value="${E(d.id)}">
+    <button class="ok" type="submit">Approve -> Warehouse</button>
+  </form>
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="returnTo" value="/admin">
+    <input type="hidden" name="action" value="rework">
+    <input type="hidden" name="id" value="${E(d.id)}">
+    <input name="feedback" placeholder="Rework note..." required>
+    <button type="submit" style="background:#34270a;color:#d29922;border-color:#4d3c14">Request Rework</button>
+  </form>
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="returnTo" value="/admin">
+    <input type="hidden" name="action" value="reject">
+    <input type="hidden" name="id" value="${E(d.id)}">
+    <input name="feedback" placeholder="Reject reason..." required>
+    <button class="bad" type="submit">Reject</button>
+  </form>
+</div>`
+  }
+
+  const renderOrder = (order: ClientOrder): string => {
+    const d = deliverableFor(order)
+    const done = order.status === "approved" || order.status === "closed"
+    const cls = order.status === "ready_for_review" ? "ready" : done ? "done" : order.status === "rejected" ? "bad" : ""
+    return `
+<div class="admin-order ${cls}">
+  <div class="daily-header">
+    ${badge(order.status, orderBadgeCls(order.status))}
+    ${badge(order.department, "info")}
+    <span class="daily-title">${E(order.clientName)}</span>
+    ${order.taskType ? `<span class="dim" style="font-size:11px">task: ${E(order.taskType)}</span>` : ""}
+    <span class="dim" style="font-size:11px">rev ${order.revisionCount}</span>
+  </div>
+  <div class="dim" style="font-size:12px;margin-bottom:5px">contact: ${E(order.contact ?? "not set")}</div>
+  <div style="font-size:12.5px;color:#dbe7f0">${E(order.description)}</div>
+  ${d ? `
+    <div class="admin-preview">${E(preview(d.content))}</div>
+    <div class="dim" style="font-size:11px;margin-top:6px">deliverable ${E(d.id)} · score ${d.qualityScore} · ${E(d.status)} · ${E(d.type)}</div>
+    ${renderOrderActions(d)}
+  ` : '<div class="dim" style="font-size:12px;margin-top:8px">No deliverable yet.</div>'}
+</div>`
+  }
+
+  const orderGroup = (title: string, items: ClientOrder[], empty: string): string => `
+<div class="admin-panel">
+  <h2>${E(title)} (${items.length})</h2>
+  <div class="admin-list">
+    ${items.length === 0 ? `<p class="dim">${E(empty)}</p>` : [...items].reverse().map(renderOrder).join("")}
+  </div>
+</div>`
+
+  const renderTrainingActions = (item: DailyDigital): string => {
+    if (item.status !== "draft_ready" && item.status !== "needs_rework") return ""
+    return `
+<div class="admin-actions">
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="returnTo" value="/admin">
+    <input type="hidden" name="action" value="accept">
+    <input type="hidden" name="id" value="${E(item.id)}">
+    <button class="ok" type="submit">Accept</button>
+  </form>
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="returnTo" value="/admin">
+    <input type="hidden" name="action" value="warehouse">
+    <input type="hidden" name="id" value="${E(item.id)}">
+    <button type="submit" style="background:#0f2740;color:#58a6ff;border-color:#1c3a5e">Warehouse</button>
+  </form>
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="returnTo" value="/admin">
+    <input type="hidden" name="action" value="rework">
+    <input type="hidden" name="id" value="${E(item.id)}">
+    <input name="feedback" placeholder="Rework note..." required>
+    <button type="submit" style="background:#34270a;color:#d29922;border-color:#4d3c14">Rework</button>
+  </form>
+  <form method="POST" action="/api/daily">
+    <input type="hidden" name="returnTo" value="/admin">
+    <input type="hidden" name="action" value="reject">
+    <input type="hidden" name="id" value="${E(item.id)}">
+    <input name="feedback" placeholder="Reject reason..." required>
+    <button class="bad" type="submit">Reject</button>
+  </form>
+</div>`
+  }
+
+  const renderTrainingItem = (item: DailyDigital): string => `
+<div class="admin-order ${item.status === "rejected" ? "bad" : item.status === "accepted" ? "done" : item.status === "needs_rework" ? "ready" : ""}">
+  <div class="daily-header">
+    ${badge(item.status, itemBadgeCls(item.status))}
+    ${badge(item.department, "info")}
+    <span class="daily-title">${E(item.title)}</span>
+    <span class="dim" style="font-size:11px">score ${item.qualityScore} · rev ${item.revisionCount} · ${E(item.date)}</span>
+  </div>
+  <div class="admin-preview">${E(preview(item.content, 300))}</div>
+  ${item.operatorFeedback ? `<div class="dim" style="font-size:12px;margin-top:6px;color:#d29922">feedback: ${E(item.operatorFeedback)}</div>` : ""}
+  ${renderTrainingActions(item)}
+</div>`
+
+  const latestWarehouse = [...warehouseAssets]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 6)
+
+  const criticalEvents = [...state.events]
+    .reverse()
+    .filter((e) =>
+      e.eventType.startsWith("order.") ||
+      e.eventType === "factory.cycle" ||
+      e.eventType.startsWith("daily.") ||
+      e.eventType.startsWith("approval.") ||
+      e.eventType === "factory.autopilot_on" ||
+      e.eventType === "factory.autopilot_off",
+    )
+    .slice(0, 18)
+
+  return layout("Boss/Admin Cockpit", "/admin", `
+<div class="admin-shell">
+  <section class="admin-hero">
+    <div>
+      <div class="admin-kicker">Founder command center</div>
+      <h1 class="admin-title">Boss/Admin Cockpit</h1>
+      <p class="admin-sub">Operational control for factory-core v0.2.1. Autonomy of thinking without autonomy of action: the system can produce internal work, but the operator approves every external step.</p>
+    </div>
+    <div class="admin-mode">
+      ${badge(mode, mode === "CLIENT_MODE" ? "warn" : mode === "NO_CLIENT_TRAINING_MODE" ? "info" : "muted")}
+      ${badge(autopilotEnabled ? "autopilot ON" : "autopilot OFF", autopilotEnabled ? "ok" : "bad")}
+      <span class="dim" style="font-size:12px">last cycle: ${E(lastCycleSummary)}</span>
+    </div>
+  </section>
+
+  ${flashHtml}
+
+  <section class="admin-grid" aria-label="Executive Summary">
+    <div class="admin-card"><div class="v info">${state.orders.length}</div><div class="l">Total orders</div></div>
+    <div class="admin-card"><div class="v ${readyOrders.length ? "warn" : "ok"}">${readyOrders.length}</div><div class="l">Orders ready for review</div></div>
+    <div class="admin-card"><div class="v ${openOrders.length ? "warn" : "ok"}">${openOrders.length}</div><div class="l">Open orders</div></div>
+    <div class="admin-card"><div class="v info">${todayTraining.length}/5</div><div class="l">Training Count</div></div>
+    <div class="admin-card"><div class="v ${pendingReviewCount ? "warn" : "ok"}">${pendingReviewCount}</div><div class="l">Pending review items</div></div>
+    <div class="admin-card"><div class="v ok">${state.warehouse.length + warehouseAssets.length}</div><div class="l">Warehouse count</div></div>
+    <div class="admin-card"><div class="v bad">${trashCount}</div><div class="l">Trash/rejected count</div></div>
+    <div class="admin-card"><div class="v info">${state.events.length}</div><div class="l">Total events</div></div>
+  </section>
+
+  <section class="admin-action">
+    <h2>Next Operator Action</h2>
+    <strong>${E(nextAction[0])}</strong>
+    <p class="dim">${E(nextAction[1])}</p>
+  </section>
+
+  <section class="admin-two">
+    <div class="admin-panel">
+      <h2>Add Client Order</h2>
+      <form method="POST" action="/api/order">
+        <input type="hidden" name="returnTo" value="/admin">
+        <div class="admin-input-row">
+          <input name="clientName" placeholder="Client name" required>
+          <input name="contact" placeholder="Contact">
+          <select name="department">
+            <option value="marketing">Marketing</option>
+            <option value="sales">Sales</option>
+            <option value="delivery" selected>Delivery</option>
+            <option value="research">Research</option>
+            <option value="qa">QA</option>
+          </select>
+        </div>
+        <textarea name="description" placeholder="Describe the requested deliverable..." required></textarea>
+        <div class="admin-actions"><button type="submit">Add Order</button></div>
+      </form>
+    </div>
+
+    <div class="admin-panel hot">
+      <h2>Autopilot Control</h2>
+      <p class="dim" style="margin-bottom:10px">Persisted state: <strong>${autopilotEnabled ? "ON" : "OFF"}</strong></p>
+      <div class="admin-actions">
+        <form method="POST" action="/api/autopilot">
+          <input type="hidden" name="returnTo" value="/admin">
+          <input type="hidden" name="action" value="off">
+          <button class="bad" type="submit">Pause Autopilot</button>
+        </form>
+        <form method="POST" action="/api/autopilot">
+          <input type="hidden" name="returnTo" value="/admin">
+          <input type="hidden" name="action" value="on">
+          <button class="ok" type="submit">Resume Autopilot</button>
+        </form>
+        <form method="POST" action="/api/daily">
+          <input type="hidden" name="returnTo" value="/admin">
+          <input type="hidden" name="action" value="run">
+          <input type="hidden" name="date" value="${today}">
+          <button type="submit">Run Training Cycle</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Orders Summary</h2>
+    <div class="admin-three">
+      <div class="stat"><div class="v info">${openOrders.length}</div><div class="l">new / in_production</div></div>
+      <div class="stat"><div class="v warn">${readyOrders.length}</div><div class="l">ready_for_review</div></div>
+      <div class="stat"><div class="v ok">${approvedOrders.length}</div><div class="l">approved / closed</div></div>
+    </div>
+  </section>
+
+  <section class="admin-two">
+    <div class="admin-list">
+      ${orderGroup("Client Orders Control - new / in_production", openOrders, "No orders currently in production.")}
+      ${orderGroup("Client Orders Control - ready_for_review", readyOrders, "No client orders waiting for review.")}
+    </div>
+    <div class="admin-list">
+      ${orderGroup("Client Orders Control - approved / closed", approvedOrders, "No approved or closed orders yet.")}
+      ${orderGroup("Client Orders Control - rejected", rejectedOrders, "No rejected orders.")}
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Daily Training Review</h2>
+    <div class="admin-three" style="margin-bottom:10px">
+      <div class="stat"><div class="v info">${todayTraining.length}/5</div><div class="l">today</div></div>
+      <div class="stat"><div class="v warn">${pendingTraining.length}</div><div class="l">pending draft_ready</div></div>
+      <div class="stat"><div class="v ok">${acceptedTraining.length}</div><div class="l">accepted</div></div>
+      <div class="stat"><div class="v bad">${rejectedTraining.length}</div><div class="l">rejected</div></div>
+      <div class="stat"><div class="v warn">${trainingItems.filter((d) => d.status === "needs_rework").length}</div><div class="l">needs_rework</div></div>
+      <div class="stat"><div class="v ok">${trainingItems.filter((d) => d.location === "warehouse").length}</div><div class="l">warehoused</div></div>
+    </div>
+    <div class="admin-list">
+      ${trainingItems.length === 0 ? '<p class="dim">No training-only assets yet.</p>' : [...trainingItems].reverse().slice(0, 12).map(renderTrainingItem).join("")}
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Warehouse Summary</h2>
+    <p class="dim" style="margin-bottom:10px">${state.warehouse.length} pipeline offers and ${warehouseAssets.length} digital assets approved by the operator. No external send, email, CRM push, or publish action exists here.</p>
+    ${latestWarehouse.length === 0 ? '<p class="dim">Warehouse is empty.</p>' : `
+    <table class="admin-table">
+      <thead><tr><th>Title</th><th>Type</th><th>Department</th><th>Score</th><th>Date</th><th>Preview</th></tr></thead>
+      <tbody>
+        ${latestWarehouse.map((d) => `<tr>
+          <td>${E(d.title)}</td>
+          <td>${badge(d.orderId ? "client order" : "training", d.orderId ? "warn" : "muted")}</td>
+          <td>${badge(d.department, "info")}</td>
+          <td class="mono">${d.qualityScore}</td>
+          <td class="dim">${E(d.date)}</td>
+          <td class="dim" style="font-size:12px">${E(preview(d.content, 140))}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`}
+  </section>
+
+  <section class="admin-panel">
+    <h2>Event Stream</h2>
+    ${criticalEvents.length === 0 ? '<p class="dim">No critical events yet.</p>' : `
+    <table class="admin-table">
+      <thead><tr><th>Time</th><th>Agent</th><th>Event</th><th>Detail</th></tr></thead>
+      <tbody>
+        ${criticalEvents.map((e) => `<tr>
+          <td class="mono dim">${E(e.timestamp.slice(0, 19).replace("T", " "))}</td>
+          <td>${badge(e.agentId, "info")}</td>
+          <td>${badge(e.eventType, eventBadgeCls(e.eventType))}</td>
+          <td class="dim" style="font-size:12px">${E(e.detail)}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`}
+  </section>
+
+  <section class="admin-safety">
+    <div class="admin-panel danger">
+      <h2>Known Risks / Safety Box</h2>
+      <ul>
+        <li>JsonStore is single-process; two servers can clobber writes.</li>
+        <li>events.json grows unbounded and needs rotation before high volume.</li>
+        <li>A mutex is required before async LLM calls are added to cycles.</li>
+        <li>No external sending, publishing, scraping, CRM push, email, or ad spend.</li>
+        <li>Operator approval is required before any asset leaves the factory.</li>
+      </ul>
+    </div>
+    <div class="admin-panel">
+      <h2>Admin Editing Rules</h2>
+      <ul>
+        <li>Every write is an explicit operator button or form submit.</li>
+        <li>Client orders use the existing department whitelist.</li>
+        <li>Review decisions use the existing event-logged daily actions.</li>
+        <li>No raw JSON editing and no destructive bulk mutation.</li>
+        <li>The approval gate cannot be bypassed from this cockpit.</li>
+      </ul>
+    </div>
+  </section>
+</div>`)
+}
+
 function renderEvents(state: FactoryState): string {
   const events = [...state.events].reverse()
   return layout("Events", "/events", `
@@ -628,6 +1034,7 @@ const server = createServer(async (req, res) => {
       if (url === "/events") return html(res, renderEvents(state))
       if (url === "/daily-review") return html(res, renderDailyReview(state))
       if (url === "/orders") return html(res, renderOrders(state))
+      if (url === "/admin" || url === "/operator") return html(res, renderAdmin(state))
       return html(res, "<h1>404</h1>", 404)
     }
 
@@ -659,6 +1066,7 @@ const server = createServer(async (req, res) => {
       const action = params["action"] ?? ""
       const id = params["id"] ?? ""
       const item = store.getApprovalItem(id)
+      const returnToAdmin = params["returnTo"] === "/admin"
 
       if (action === "approve" && item && item.status === "pending") {
         store.updateApprovalItem(id, { status: "approved", decidedAt: new Date().toISOString() })
@@ -696,6 +1104,9 @@ const server = createServer(async (req, res) => {
       if (accept.includes("application/json")) {
         return json(res, { ok: true })
       }
+      if (returnToAdmin) {
+        return html(res, renderAdmin(store.snapshot(), "Approval decision recorded."))
+      }
       return redirect(res, "/")
     }
 
@@ -705,13 +1116,16 @@ const server = createServer(async (req, res) => {
       const id = params["id"] ?? ""
       const feedback = (params["feedback"] ?? "").trim()
       const date = params["date"] ?? new Date().toISOString().slice(0, 10)
+      const returnToAdmin = params["returnTo"] === "/admin"
 
       // Order deliverables review here too — sync the order status afterwards
-      // and send the operator back to /orders instead of /daily-review.
+      // and send the operator back to the relevant review surface.
       const digitalBefore = store.getDailyDigital(id)
       const orderId = digitalBefore?.orderId
       const respond = (flash: string) =>
-        orderId
+        returnToAdmin
+          ? html(res, renderAdmin(store.snapshot(), flash))
+          : orderId
           ? html(res, renderOrders(store.snapshot(), flash))
           : html(res, renderDailyReview(store.snapshot(), flash))
       const syncOrder = (status: "approved" | "rejected" | "in_production", fb?: string) => {
@@ -727,9 +1141,9 @@ const server = createServer(async (req, res) => {
         try {
           const result = await runAutonomousCycle(store, date)
           lastCycleSummary = `${result.mode}: training=${result.trainingCreated} orders=${result.ordersProduced.length} reworks=${result.reworksRegenerated.length}`
-          return html(res, renderDailyReview(store.snapshot(), `Cycle done — ${lastCycleSummary}`))
+          return respond(`Cycle done — ${lastCycleSummary}`)
         } catch (err) {
-          return html(res, renderDailyReview(store.snapshot(), `Error: ${String(err)}`))
+          return respond(`Error: ${String(err)}`)
         }
       }
       if (action === "accept" && id) {
@@ -761,12 +1175,19 @@ const server = createServer(async (req, res) => {
       const description = (params["description"] ?? "").trim()
       const contact = (params["contact"] ?? "").trim()
       const departmentRaw = (params["department"] ?? "delivery").trim()
+      const returnToAdmin = params["returnTo"] === "/admin"
       // Reject unknown departments before anything is created — no order, no event.
       if (!(VALID_DEPARTMENTS as readonly string[]).includes(departmentRaw)) {
+        if (returnToAdmin) {
+          return html(res, renderAdmin(store.snapshot(), `Error: invalid department ${departmentRaw}`), 400)
+        }
         return json(res, { error: "invalid department", received: departmentRaw, allowed: VALID_DEPARTMENTS }, 400)
       }
       const department = departmentRaw as DailyDigitalDepartment
       if (!clientName || !description) {
+        if (returnToAdmin) {
+          return html(res, renderAdmin(store.snapshot(), "Error: client name and description are required"))
+        }
         return html(res, renderOrders(store.snapshot(), "Error: client name and description are required"))
       }
       const order = createOrder(store, {
@@ -778,11 +1199,15 @@ const server = createServer(async (req, res) => {
       // Produce immediately — the client should not wait for the next timer tick.
       const result = await runAutonomousCycle(store)
       lastCycleSummary = `${result.mode}: orders=${result.ordersProduced.length}`
+      if (returnToAdmin) {
+        return html(res, renderAdmin(store.snapshot(), `Order ${order.id} accepted and produced — review the deliverable below.`))
+      }
       return html(res, renderOrders(store.snapshot(), `Order ${order.id} accepted and produced — review the deliverable below.`))
     }
 
     if (method === "POST" && url === "/api/autopilot") {
       const params = await readBody(req)
+      const returnToAdmin = params["returnTo"] === "/admin"
       autopilotEnabled = params["action"] !== "off"
       store.setAutopilotEnabled(autopilotEnabled)
       store.addEvent({
@@ -792,6 +1217,9 @@ const server = createServer(async (req, res) => {
         eventType: autopilotEnabled ? "factory.autopilot_on" : "factory.autopilot_off",
         detail: `Operator turned autopilot ${autopilotEnabled ? "on" : "off"}`,
       })
+      if (returnToAdmin) {
+        return html(res, renderAdmin(store.snapshot(), `Autopilot ${autopilotEnabled ? "resumed" : "paused"}.`))
+      }
       return html(res, renderFactory(store.snapshot(), `Autopilot ${autopilotEnabled ? "resumed" : "paused"}.`))
     }
 
@@ -821,6 +1249,8 @@ setInterval(autopilotTick, 60_000)
 
 server.listen(PORT, () => {
   console.log(`\nFactory Core v0.2 — http://localhost:${PORT}`)
+  console.log("  /admin        — boss/admin cockpit")
+  console.log("  /operator     — admin cockpit alias")
   console.log("  / or /factory  — pipeline overview + signal form + autopilot toggle")
   console.log("  /orders        — client orders: intake, production, review")
   console.log("  /leads         — qualified leads")

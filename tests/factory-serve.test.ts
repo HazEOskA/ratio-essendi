@@ -54,6 +54,7 @@ after(async () => {
 })
 
 const dataFile = (name: string) => JSON.parse(readFileSync(join(workDir, ".factory-data", name), "utf8"))
+const rawDataFile = (name: string) => readFileSync(join(workDir, ".factory-data", name), "utf8")
 
 test("invalid department returns 400 with a clean JSON error", async () => {
   await startServer()
@@ -82,6 +83,39 @@ test("invalid department writes no order and no order events", () => {
   assert.equal(orderEvents.length, 0, `no order.* events allowed, got: ${orderEvents.map((e) => e.eventType).join(",")}`)
 })
 
+test("admin cockpit renders required sections and GET does not mutate store", async () => {
+  const files = [
+    "orders.json",
+    "daily-digitals.json",
+    "daily-missions.json",
+    "events.json",
+    "warehouse.json",
+    "trash.json",
+    "settings.json",
+  ]
+  const before = files.map((name) => [name, rawDataFile(name)])
+
+  const res = await fetch(`${BASE}/admin`)
+  assert.equal(res.status, 200)
+  const page = await res.text()
+  assert.match(page, /Boss\/Admin Cockpit/)
+  assert.match(page, /autopilot ON/)
+  assert.match(page, /Next Operator Action/)
+  assert.match(page, /Orders Summary/)
+  assert.match(page, /Training Count/)
+  assert.match(page, /Warehouse Summary/)
+  assert.match(page, /Event Stream/)
+  assert.match(page, /Client Orders Control/)
+  assert.match(page, /Daily Training Review/)
+
+  const alias = await fetch(`${BASE}/operator`)
+  assert.equal(alias.status, 200)
+  assert.match(await alias.text(), /Boss\/Admin Cockpit/)
+
+  const after = files.map((name) => [name, rawDataFile(name)])
+  assert.deepEqual(after, before, "GET /admin and /operator must not mutate the store")
+})
+
 test("valid department is still accepted (whitelist does not over-block)", async () => {
   const res = await fetch(`${BASE}/api/order`, {
     method: "POST",
@@ -96,6 +130,13 @@ test("valid department is still accepted (whitelist does not over-block)", async
   const orders = dataFile("orders.json") as { status: string }[]
   assert.equal(orders.length, 1)
   assert.equal(orders[0]!.status, "ready_for_review")
+
+  const admin = await (await fetch(`${BASE}/admin`)).text()
+  assert.match(admin, /GoodCo/)
+  assert.match(admin, /ready_for_review/)
+  assert.match(admin, /deliverable/)
+  assert.match(admin, /Client Orders Control - ready_for_review/)
+  assert.match(admin, /Daily Training Review/)
 })
 
 test("paused autopilot remains paused after a real server restart", async () => {
@@ -116,5 +157,7 @@ test("paused autopilot remains paused after a real server restart", async () => 
 
   const pageAfter = await (await fetch(`${BASE}/`)).text()
   assert.match(pageAfter, /autopilot OFF/, "pause must survive a restart")
+  const adminAfter = await (await fetch(`${BASE}/admin`)).text()
+  assert.match(adminAfter, /autopilot OFF/, "admin cockpit must show the persisted OFF state")
   assert.equal((dataFile("settings.json") as { autopilotEnabled: boolean }).autopilotEnabled, false)
 })
