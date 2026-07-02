@@ -191,6 +191,15 @@ button.bad{background:#3a1418;color:#f85149;border-color:#5a1e23}
 .timeline-step{background:#070b11;border:1px solid #263241;border-left:3px solid #00f5ff;border-radius:8px;padding:10px}
 .timeline-step.failed{border-left-color:#f85149}.timeline-step.skipped{border-left-color:#8b949e}
 .idle-box{background:rgba(52,39,10,.55);border:1px solid rgba(255,184,0,.42);border-radius:8px;padding:12px;color:#f0d28a}
+.idle-box .kicker{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:#d29922;margin-bottom:4px}
+.run-drill{background:#0b1119;border:1px solid #263241;border-radius:8px;padding:8px 12px;margin-bottom:8px}
+.run-drill summary{cursor:pointer;font-size:12.5px;color:#dbe7f0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.run-drill[open]{border-color:rgba(0,245,255,.45)}
+.run-drill .drill-body{margin-top:8px;border-top:1px solid #263241;padding-top:8px}
+.wait-items{margin:8px 0 0;padding-left:18px;color:#a9b7c5;font-size:12px}
+.wait-items li{margin:3px 0}
+.wait-items a{color:#58a6ff}
+.admin-table a{color:#58a6ff;text-decoration:none}
 @media (max-width:860px){
   .admin-hero,.admin-two,.admin-safety{grid-template-columns:1fr}
   .admin-grid,.admin-three,.workroom-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -611,6 +620,90 @@ ${orders.length === 0 ? '<p class="dim">No orders yet. When there are no orders,
 </div>`).join("")}`)
 }
 
+type OpsWaiting = {
+  ordersReadyForReview: number
+  trainingDrafts: number
+  needsRework: number
+  pendingApprovals: number
+}
+
+type OpsView = {
+  mode: "CLIENT_MODE" | "REWORK_MODE" | "NO_CLIENT_TRAINING_MODE" | "IDLE"
+  nextActionTitle: string
+  nextActionDetail: string
+  standingStill: string
+  waiting: OpsWaiting
+  trainingToday: number
+}
+
+/**
+ * Single source of truth for "what is the factory doing and why" — used by the
+ * admin cockpit AND the read-only debug endpoints, so page and JSON never drift.
+ */
+function deriveOps(state: FactoryState): OpsView {
+  const today = new Date().toISOString().slice(0, 10)
+  // Mirror the autopilot's own arbitration: an open order whose deliverable is
+  // flagged needs_rework is handled by the rework stage, not order production.
+  const openOrders = state.orders.filter((o) => {
+    if (o.status !== "new" && o.status !== "in_production") return false
+    const d = o.deliverableId ? state.dailyDigitals.find((x) => x.id === o.deliverableId) : undefined
+    return d?.status !== "needs_rework"
+  }).length
+  const readyOrders = state.orders.filter((o) => o.status === "ready_for_review").length
+  const trainingItems = state.dailyDigitals.filter((d) => !d.orderId)
+  const trainingToday = trainingItems.filter((d) => d.date === today).length
+  const trainingDrafts = trainingItems.filter((d) => d.status === "draft_ready").length
+  const needsRework = state.dailyDigitals.filter((d) => d.status === "needs_rework").length
+  const pendingApprovals = state.approvalQueue.filter((a) => a.status === "pending").length
+  const waiting: OpsWaiting = { ordersReadyForReview: readyOrders, trainingDrafts, needsRework, pendingApprovals }
+
+  const mode: OpsView["mode"] = openOrders > 0
+    ? "CLIENT_MODE"
+    : needsRework > 0
+      ? "REWORK_MODE"
+      : trainingToday < 5
+        ? "NO_CLIENT_TRAINING_MODE"
+        : "IDLE"
+
+  const s = (n: number) => (n === 1 ? "" : "s")
+  let standingStill: string
+  if (!autopilotEnabled) {
+    standingStill =
+      "Factory is paused because autopilot is OFF. It will not self-run cycles until resumed." +
+      (readyOrders + trainingDrafts > 0
+        ? ` Meanwhile ${readyOrders} client output${s(readyOrders)} and ${trainingDrafts} training draft${s(trainingDrafts)} are pending review.`
+        : "")
+  } else if (openOrders > 0) {
+    standingStill = `Factory is producing: ${openOrders} open client order${s(openOrders)} in the pipeline.`
+  } else if (needsRework > 0) {
+    standingStill = `Factory is waiting for the rework cycle to regenerate ${needsRework} flagged output${s(needsRework)}.`
+  } else if (readyOrders + trainingDrafts + pendingApprovals > 0) {
+    standingStill =
+      `Factory is waiting for operator review: ${readyOrders} client output${s(readyOrders)} and ${trainingDrafts} training draft${s(trainingDrafts)} are pending.` +
+      (pendingApprovals > 0 ? ` Plus ${pendingApprovals} pipeline approval item${s(pendingApprovals)}.` : "")
+  } else if (trainingToday >= 5) {
+    standingStill = "Factory is idle because today's training quota is complete and no client orders are open."
+  } else {
+    standingStill = `Factory is idle: training quota ${trainingToday}/5 for today — run a training cycle or wait for the next autopilot tick.`
+  }
+
+  const [nextActionTitle, nextActionDetail]: [string, string] = readyOrders > 0
+    ? ["Review client order", `${readyOrders} client order${s(readyOrders)} waiting for approval, rework, or rejection.`]
+    : needsRework > 0
+      ? ["Wait for or run rework cycle", `${needsRework} item${s(needsRework)} marked needs_rework.`]
+      : !autopilotEnabled
+        ? ["Resume autopilot or keep paused intentionally", "The persisted autopilot setting is OFF."]
+        : trainingToday < 5 && openOrders === 0
+          ? ["Run training cycle", `Today has ${trainingToday}/5 training assets.`]
+          : trainingDrafts > 0
+            ? ["Review training assets", `${trainingDrafts} training draft${s(trainingDrafts)} ready for operator review.`]
+            : pendingApprovals > 0
+              ? ["Review pipeline approval item", `${pendingApprovals} approval item${s(pendingApprovals)} pending.`]
+              : ["System is idle / no urgent action", "No client order or training asset needs immediate attention."]
+
+  return { mode, nextActionTitle, nextActionDetail, standingStill, waiting, trainingToday }
+}
+
 function renderAdmin(state: FactoryState, flash?: string): string {
   const today = new Date().toISOString().slice(0, 10)
   const openOrders = state.orders.filter((o) => o.status === "new" || o.status === "in_production")
@@ -629,23 +722,9 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   const pendingReviewCount = readyOrders.length + pendingTraining.length + reworkItems.length + pendingApprovalCount
   const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
 
-  const mode = openOrders.length > 0
-    ? "CLIENT_MODE"
-    : todayTraining.length < 5
-      ? "NO_CLIENT_TRAINING_MODE"
-      : "IDLE"
-
-  const nextAction = readyOrders.length > 0
-    ? ["Review client order", `${readyOrders.length} client order${readyOrders.length === 1 ? "" : "s"} waiting for approval, rework, or rejection.`]
-    : reworkItems.length > 0
-      ? ["Wait for or run rework cycle", `${reworkItems.length} item${reworkItems.length === 1 ? "" : "s"} marked needs_rework.`]
-      : !autopilotEnabled
-        ? ["Resume autopilot or keep paused intentionally", "The persisted autopilot setting is OFF."]
-        : todayTraining.length < 5 && openOrders.length === 0
-          ? ["Run training cycle", `Today has ${todayTraining.length}/5 training assets.`]
-          : pendingTraining.length > 0
-            ? ["Review training assets", `${pendingTraining.length} training draft${pendingTraining.length === 1 ? "" : "s"} ready for operator review.`]
-            : ["System is idle / no urgent action", "No client order or training asset needs immediate attention."]
+  const ops = deriveOps(state)
+  const mode = ops.mode
+  const nextAction: [string, string] = [ops.nextActionTitle, ops.nextActionDetail]
 
   const orderBadgeCls = (s: ClientOrder["status"]): string => {
     if (s === "approved" || s === "closed") return "ok"
@@ -719,14 +798,15 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   <div style="font-size:12.5px;color:#dbe7f0">${E(order.description)}</div>
   ${d ? `
     <div class="admin-preview">${E(preview(d.content))}</div>
-    <div class="dim" style="font-size:11px;margin-top:6px">deliverable ${E(d.id)} · score ${d.qualityScore} · ${E(d.status)} · ${E(d.type)}</div>
+    <div class="dim" style="font-size:11px;margin-top:6px">deliverable ${E(d.id)} · by ${E(d.createdByAgentId)} · score ${d.qualityScore} · rev ${d.revisionCount} · ${E(d.status)} · ${E(d.taskType ?? d.type)}</div>
+    ${d.operatorFeedback ? `<div class="dim" style="font-size:12px;margin-top:4px;color:#d29922">operator feedback: ${E(d.operatorFeedback)}${d.revisionCount > 0 ? ` (applied in rev ${d.revisionCount})` : ""}</div>` : ""}
     ${renderOrderActions(d)}
   ` : '<div class="dim" style="font-size:12px;margin-top:8px">No deliverable yet.</div>'}
 </div>`
   }
 
-  const orderGroup = (title: string, items: ClientOrder[], empty: string): string => `
-<div class="admin-panel">
+  const orderGroup = (title: string, items: ClientOrder[], empty: string, anchorId?: string): string => `
+<div class="admin-panel"${anchorId ? ` id="${anchorId}"` : ""}>
   <h2>${E(title)} (${items.length})</h2>
   <div class="admin-list">
     ${items.length === 0 ? `<p class="dim">${E(empty)}</p>` : [...items].reverse().map(renderOrder).join("")}
@@ -771,11 +851,13 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   <div class="daily-header">
     ${badge(item.status, itemBadgeCls(item.status))}
     ${badge(item.department, "info")}
+    ${badge("training", "muted")}
     <span class="daily-title">${E(item.title)}</span>
-    <span class="dim" style="font-size:11px">score ${item.qualityScore} · rev ${item.revisionCount} · ${E(item.date)}</span>
+    <span class="dim" style="font-size:11px">${E(item.taskType ?? item.type)} · by ${E(item.createdByAgentId)} · score ${item.qualityScore} · rev ${item.revisionCount} · ${E(item.date)}</span>
   </div>
+  <div class="dim mono" style="font-size:11px;margin-top:4px">output ${E(item.id)}</div>
   <div class="admin-preview">${E(preview(item.content, 300))}</div>
-  ${item.operatorFeedback ? `<div class="dim" style="font-size:12px;margin-top:6px;color:#d29922">feedback: ${E(item.operatorFeedback)}</div>` : ""}
+  ${item.operatorFeedback ? `<div class="dim" style="font-size:12px;margin-top:6px;color:#d29922">feedback: ${E(item.operatorFeedback)}${item.revisionCount > 0 ? ` (applied in rev ${item.revisionCount})` : ""}</div>` : ""}
   ${renderTrainingActions(item)}
 </div>`
 
@@ -811,35 +893,42 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     .reverse()
     .flatMap((run) => run.steps.map((step) => ({ run, step })))
   const latestStepFor = (agentId: WorkroomAgentId) => runStepPairs.find((x) => x.step.agentId === agentId)
-  const waitingOperatorCount = readyOrders.length + pendingTraining.length + pendingApprovalCount
-  const visibleIdleReason = lastRun?.idleReason
-    ?? (waitingOperatorCount > 0 ? "Factory is waiting for operator review." : "No idle cycle recorded yet.")
+  const digitalById = new Map(state.dailyDigitals.map((d) => [d.id, d]))
 
+  // Honest derived status — the system is synchronous, so an agent is never
+  // "live". It either completed work, has output waiting for review, was
+  // skipped/idle, or its run failed (blocked).
   const renderWorkAgent = (agentId: WorkroomAgentId): string => {
     const latest = latestStepFor(agentId)
     const step = latest?.step
-    const status = latest?.run.status === "failed"
-      ? "failed"
-      : step?.status === "completed"
-        ? "active"
-        : step?.status ?? "waiting"
-    const lastOutput = step?.outputId
-      ? step.outputId
-      : step?.outputSummary
-        ? preview(step.outputSummary, 90)
-        : "No output recorded yet"
+    const outputDigital = step?.outputId ? digitalById.get(step.outputId) : undefined
+    const status = !step
+      ? "idle"
+      : latest!.run.status === "failed" || step.status === "failed"
+        ? "blocked"
+        : step.status === "skipped"
+          ? "idle"
+          : outputDigital?.status === "draft_ready" || outputDigital?.status === "needs_rework"
+            ? "waiting_review"
+            : "completed"
+    const relatedOrder = outputDigital?.orderId
     const next = agentId === "N"
-      ? lastRun?.nextOperatorAction ?? nextAction[0]
-      : step?.outputId
-        ? "Waiting for operator review"
-        : "Waiting for a matching order, rework, or training slot"
+      ? nextAction[0]
+      : status === "waiting_review"
+        ? `Operator: review ${step?.outputId ?? "output"}`
+        : status === "blocked"
+          ? "Inspect the failed work run below"
+          : "Waiting for a matching order, rework, or training slot"
 
     return `
-<div class="work-agent ${status === "failed" ? "failed" : status === "active" ? "active" : "waiting"}">
+<div class="work-agent ${status === "blocked" ? "failed" : status === "waiting_review" ? "active" : "waiting"}">
   <div class="name">${E(agentId)} · ${E(agentNames[agentId])}</div>
-  <div class="meta">${E(status)}${step?.department ? ` · ${E(step.department)}` : ""}</div>
+  <div class="meta">${E(status)}${step?.department ? ` · ${E(step.department)}` : ""}${step ? ` · last run ${E(step.finishedAt.slice(0, 19).replace("T", " "))}` : ""}</div>
   <div class="line"><strong>Last job:</strong> ${E(step?.jobType ?? "none yet")}</div>
-  <div class="line"><strong>Last output:</strong> ${E(lastOutput)}</div>
+  <div class="line"><strong>Last input:</strong> ${step ? E(preview(step.inputSummary, 110)) : "—"}</div>
+  <div class="line"><strong>Last output:</strong> ${E(step?.outputSummary ? preview(step.outputSummary, 110) : "No output recorded yet")}</div>
+  ${step?.outputId ? `<div class="line mono" style="font-size:11px"><strong>Output id:</strong> ${E(step.outputId)}</div>` : ""}
+  ${relatedOrder ? `<div class="line mono" style="font-size:11px"><strong>Related order:</strong> ${E(relatedOrder)}</div>` : ""}
   <div class="line"><strong>Next:</strong> ${E(next)}</div>
 </div>`
   }
@@ -950,7 +1039,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   <section class="admin-two">
     <div class="admin-list">
       ${orderGroup("Client Orders Control - new / in_production", openOrders, "No orders currently in production.")}
-      ${orderGroup("Client Orders Control - ready_for_review", readyOrders, "No client orders waiting for review.")}
+      ${orderGroup("Client Orders Control - ready_for_review", readyOrders, "No client orders waiting for review.", "orders-review")}
     </div>
     <div class="admin-list">
       ${orderGroup("Client Orders Control - approved / closed", approvedOrders, "No approved or closed orders yet.")}
@@ -958,7 +1047,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     </div>
   </section>
 
-  <section class="admin-panel">
+  <section class="admin-panel" id="training-review">
     <h2>Daily Training Review</h2>
     <div class="admin-three" style="margin-bottom:10px">
       <div class="stat"><div class="v info">${todayTraining.length}/5</div><div class="l">today</div></div>
@@ -981,8 +1070,10 @@ function renderAdmin(state: FactoryState, flash?: string): string {
       <div class="stat"><div class="v warn">${lastRun?.steps.length ?? 0}</div><div class="l">Agent steps</div></div>
     </div>
     <div class="idle-box" style="margin-bottom:10px">
-      <strong>${E(visibleIdleReason)}</strong>
-      <div class="dim" style="font-size:12px;margin-top:4px">Next operator action: ${E(lastRun?.nextOperatorAction ?? nextAction[0])}</div>
+      <div class="kicker">Why It Is Standing Still</div>
+      <strong>${E(ops.standingStill)}</strong>
+      ${lastRun?.idleReason ? `<div class="dim" style="font-size:11.5px;margin-top:4px">Last recorded cycle said: ${E(lastRun.idleReason)}</div>` : ""}
+      <div class="dim" style="font-size:12px;margin-top:4px">Next operator action: ${E(nextAction[0])} — ${E(nextAction[1])}</div>
     </div>
     <div class="workroom-grid" style="margin-bottom:12px">
       ${workroomAgents.map(renderWorkAgent).join("")}
@@ -997,36 +1088,43 @@ function renderAdmin(state: FactoryState, flash?: string): string {
       </div>
       <div class="admin-subpanel">
         <h2>Waiting for Operator</h2>
-        <p class="dim" style="font-size:12px;margin-bottom:8px">${waitingOperatorCount > 0 ? "Factory is waiting for operator review." : "No operator review blocker right now."}</p>
+        <p class="dim" style="font-size:12px;margin-bottom:8px">${E(ops.standingStill)}</p>
         <table class="admin-table">
           <tbody>
-            <tr><th>Client orders ready for review</th><td>${readyOrders.length}</td></tr>
-            <tr><th>Training drafts waiting</th><td>${pendingTraining.length}</td></tr>
-            <tr><th>Reworks waiting</th><td>${reworkItems.length}</td></tr>
-            <tr><th>Pipeline approval items</th><td>${pendingApprovalCount}</td></tr>
+            <tr><th><a href="#orders-review">Client orders ready for review</a></th><td>${readyOrders.length}</td></tr>
+            <tr><th><a href="#training-review">Training drafts waiting</a></th><td>${pendingTraining.length}</td></tr>
+            <tr><th><a href="#training-review">Reworks waiting for cycle</a></th><td>${reworkItems.length}</td></tr>
+            <tr><th>Pipeline approval items (see /factory)</th><td>${pendingApprovalCount}</td></tr>
           </tbody>
         </table>
+        ${readyOrders.length + pendingTraining.length + reworkItems.length > 0 ? `
+        <ul class="wait-items">
+          ${readyOrders.map((o) => `<li><span class="mono">${E(o.deliverableId ?? o.id)}</span> — ${E(o.clientName)} (${E(o.department)}): Approve → Warehouse / Request Rework / Reject — <a href="#orders-review">open</a></li>`).join("")}
+          ${pendingTraining.slice(0, 6).map((d) => `<li><span class="mono">${E(d.id)}</span> — ${E(d.department)} training: Accept / Warehouse / Rework / Reject — <a href="#training-review">open</a></li>`).join("")}
+          ${reworkItems.map((d) => `<li><span class="mono">${E(d.id)}</span> — flagged needs_rework${d.operatorFeedback ? `: "${E(preview(d.operatorFeedback, 70))}"` : ""} — regenerates on next cycle</li>`).join("")}
+        </ul>` : ""}
       </div>
     </div>
   </section>
 
   <section class="admin-panel">
     <h2>Recent Work Runs</h2>
-    ${recentRuns.length === 0 ? '<p class="dim">No work runs recorded yet.</p>' : `
-    <table class="admin-table">
-      <thead><tr><th>Run</th><th>Started</th><th>Mode</th><th>Trigger</th><th>Steps</th><th>Outputs</th><th>Next Operator Action</th></tr></thead>
-      <tbody>
-        ${recentRuns.map((run) => `<tr>
-          <td class="mono dim">${E(run.id)}</td>
-          <td class="mono dim">${E(run.startedAt.slice(0, 16).replace("T", " "))}</td>
-          <td>${badge(run.mode, run.mode === "IDLE" ? "muted" : run.mode === "REWORK_MODE" ? "warn" : "info")}</td>
-          <td>${E(run.trigger)}</td>
-          <td class="mono">${run.steps.length}</td>
-          <td class="mono">${run.outputsCreated.length}</td>
-          <td class="dim" style="font-size:12px">${E(run.nextOperatorAction)}</td>
-        </tr>`).join("")}
-      </tbody>
-    </table>`}
+    <p class="dim" style="font-size:12px;margin-bottom:8px">Click a run to inspect every agent step: input, output, constraints, timing.</p>
+    ${recentRuns.length === 0 ? '<p class="dim">No work runs recorded yet.</p>' : recentRuns.map((run, i) => `
+    <details class="run-drill"${i === 0 ? " open" : ""}>
+      <summary>
+        <span class="mono dim">${E(run.id)}</span>
+        ${badge(run.mode, run.mode === "IDLE" ? "muted" : run.mode === "REWORK_MODE" ? "warn" : "info")}
+        ${badge(run.status, run.status === "failed" ? "bad" : "ok")}
+        <span class="dim" style="font-size:11.5px">trigger: ${E(run.trigger)} · ${E(run.startedAt.slice(0, 19).replace("T", " "))} -> ${E(run.finishedAt.slice(11, 19))} · ${run.steps.length} step${run.steps.length === 1 ? "" : "s"} · ${run.outputsCreated.length} output${run.outputsCreated.length === 1 ? "" : "s"}</span>
+      </summary>
+      <div class="drill-body">
+        ${run.idleReason ? `<div class="dim" style="font-size:12px">Idle reason: ${E(run.idleReason)}</div>` : ""}
+        <div class="dim" style="font-size:12px">Next operator action: ${E(run.nextOperatorAction)}</div>
+        ${run.outputsCreated.length ? `<div class="dim mono" style="font-size:11px;margin-top:4px">Outputs created: ${run.outputsCreated.map((o) => E(o)).join(", ")}</div>` : ""}
+        <div class="timeline">${run.steps.map(renderStep).join("")}</div>
+      </div>
+    </details>`).join("")}
   </section>
 
   <section class="admin-panel">
@@ -1169,6 +1267,59 @@ const server = createServer(async (req, res) => {
       if (url === "/daily-review") return html(res, renderDailyReview(state))
       if (url === "/orders") return html(res, renderOrders(state))
       if (url === "/admin" || url === "/operator") return html(res, renderAdmin(state))
+
+      // Read-only debug endpoints — no store mutation, JSON only (Phase 2).
+      if (url === "/api/admin/state") {
+        const ops = deriveOps(state)
+        return json(res, {
+          generatedAt: new Date().toISOString(),
+          autopilotEnabled,
+          lastCycleSummary,
+          mode: ops.mode,
+          standingStill: ops.standingStill,
+          nextOperatorAction: { title: ops.nextActionTitle, detail: ops.nextActionDetail },
+          waiting: ops.waiting,
+          counts: {
+            orders: state.orders.length,
+            dailyDigitals: state.dailyDigitals.length,
+            trainingToday: `${ops.trainingToday}/5`,
+            warehouseOffers: state.warehouse.length,
+            warehouseAssets: state.dailyDigitals.filter((d) => d.location === "warehouse").length,
+            trash: state.trash.length + state.dailyDigitals.filter((d) => d.location === "trash").length,
+            events: state.events.length,
+            workRuns: state.workRuns.length,
+          },
+          orders: state.orders.map((o) => ({
+            id: o.id,
+            clientName: o.clientName,
+            department: o.department,
+            taskType: o.taskType,
+            status: o.status,
+            deliverableId: o.deliverableId,
+            revisionCount: o.revisionCount,
+            updatedAt: o.updatedAt,
+          })),
+          workRunsSummary: [...state.workRuns].reverse().slice(0, 10).map((r) => ({
+            id: r.id,
+            mode: r.mode,
+            status: r.status,
+            trigger: r.trigger,
+            startedAt: r.startedAt,
+            finishedAt: r.finishedAt,
+            steps: r.steps.length,
+            outputsCreated: r.outputsCreated,
+            idleReason: r.idleReason,
+            nextOperatorAction: r.nextOperatorAction,
+          })),
+        })
+      }
+      if (url === "/api/work-runs") {
+        return json(res, {
+          total: state.workRuns.length,
+          workRuns: [...state.workRuns].reverse().slice(0, 20),
+        })
+      }
+
       return html(res, "<h1>404</h1>", 404)
     }
 
@@ -1385,6 +1536,8 @@ server.listen(PORT, () => {
   console.log(`\nFactory Core v0.2 — http://localhost:${PORT}`)
   console.log("  /admin        — boss/admin cockpit")
   console.log("  /operator     — admin cockpit alias")
+  console.log("  /api/admin/state — read-only cockpit state (JSON)")
+  console.log("  /api/work-runs   — read-only recent work runs (JSON)")
   console.log("  / or /factory  — pipeline overview + signal form + autopilot toggle")
   console.log("  /orders        — client orders: intake, production, review")
   console.log("  /leads         — qualified leads")

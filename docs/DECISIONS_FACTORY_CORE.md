@@ -59,3 +59,15 @@ Daily training task types are selected randomly per run (not by `dayOfYear` rota
 ## FC-015 — Producers Are Registered Agents
 
 The five mission producers (MA, SA, DA, RA, QAA) are full registry members with watch/trigger/nextAction contracts, subject to the same "no dead agents" validation as pipeline agents A–N. Registry size is 19. An agent that produces output but has no contract is an audit finding, not a shortcut.
+
+## FC-016 — Cockpit State Has One Derivation
+
+`deriveOps()` in the server is the single source of truth for mode, standing-still reason, next operator action, and waiting counts. The /admin page and the read-only debug endpoints (`/api/admin/state`, `/api/work-runs`) all consume it, so the page and the JSON can never disagree. It mirrors the autopilot's own arbitration (an order whose deliverable is flagged needs_rework belongs to the rework stage, not order production).
+
+## FC-017 — Agent Cards Show Honest Derived Status, Never Fake Liveness
+
+The system is synchronous. Agent work cards therefore report only truthful derived states: `completed`, `waiting_review` (output sits at the review gate), `idle` (no matching job), `blocked` (run failed). There is no "working…" animation and no pretend-async status — see the mission constraint "do not fake live async work".
+
+## FC-018 — Debug Endpoints Are Read-Only
+
+`GET /api/admin/state` and `GET /api/work-runs` exist to verify cockpit correctness. They read a snapshot and return JSON; they perform no writes and add no external capability. Write paths remain the existing operator forms only.
