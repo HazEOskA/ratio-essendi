@@ -13,6 +13,7 @@ import type {
   DailyMission,
   FeedbackEvent,
   ClientOrder,
+  FactoryWorkRun,
 } from "./types.js"
 
 export class JsonStore<T> {
@@ -62,6 +63,7 @@ export class FactoryStore {
   readonly #feedbackEvents: JsonStore<FeedbackEvent[]>
   readonly #orders: JsonStore<ClientOrder[]>
   readonly #settings: JsonStore<FactorySettings>
+  readonly #workRuns: JsonStore<FactoryWorkRun[]>
 
   constructor(dataDir: string) {
     const p = (name: string) => join(dataDir, `${name}.json`)
@@ -76,6 +78,7 @@ export class FactoryStore {
     this.#feedbackEvents = new JsonStore(p("feedback-events"), [])
     this.#orders = new JsonStore(p("orders"), [])
     this.#settings = new JsonStore(p("settings"), { autopilotEnabled: true })
+    this.#workRuns = new JsonStore(p("work-runs"), [])
   }
 
   snapshot(): FactoryState {
@@ -90,6 +93,7 @@ export class FactoryStore {
       dailyMissions: this.#dailyMissions.read(),
       feedbackEvents: this.#feedbackEvents.read(),
       orders: this.#orders.read(),
+      workRuns: this.#workRuns.read(),
     }
   }
 
@@ -189,6 +193,21 @@ export class FactoryStore {
 
   setAutopilotEnabled(value: boolean): void {
     this.#settings.update((s) => ({ ...s, autopilotEnabled: value }))
+  }
+
+  // --- Work run ledger ---
+
+  addWorkRun(run: FactoryWorkRun): void {
+    this.#workRuns.update((arr) => [...arr, run])
+  }
+
+  getRecentWorkRuns(limit = 10): FactoryWorkRun[] {
+    return [...this.#workRuns.read()].reverse().slice(0, limit)
+  }
+
+  getLastWorkRun(): FactoryWorkRun | undefined {
+    const runs = this.#workRuns.read()
+    return runs[runs.length - 1]
   }
 
   /** Returns recent operator feedback text grouped by department, from needs_rework and rejected items. */

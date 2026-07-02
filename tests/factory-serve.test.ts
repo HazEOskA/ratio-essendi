@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url"
 import { tmpdir } from "node:os"
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
-const TSX = join(ROOT, "node_modules", ".bin", "tsx")
+const TSX_CLI = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs")
 const SERVER = join(ROOT, "tests", "factory-serve.ts")
 const PORT = 7871
 const BASE = `http://127.0.0.1:${PORT}`
@@ -21,7 +21,7 @@ const workDir = mkdtempSync(join(tmpdir(), "factory-serve-test-"))
 let child: ChildProcess | undefined
 
 async function startServer(): Promise<void> {
-  child = spawn(TSX, [SERVER], {
+  child = spawn(process.execPath, [TSX_CLI, SERVER], {
     cwd: workDir,
     env: { ...process.env, PORT: String(PORT) },
     stdio: "ignore",
@@ -54,6 +54,7 @@ after(async () => {
 })
 
 const dataFile = (name: string) => JSON.parse(readFileSync(join(workDir, ".factory-data", name), "utf8"))
+const rawDataFile = (name: string) => readFileSync(join(workDir, ".factory-data", name), "utf8")
 
 test("invalid department returns 400 with a clean JSON error", async () => {
   await startServer()
@@ -82,6 +83,43 @@ test("invalid department writes no order and no order events", () => {
   assert.equal(orderEvents.length, 0, `no order.* events allowed, got: ${orderEvents.map((e) => e.eventType).join(",")}`)
 })
 
+test("admin cockpit renders required sections and GET does not mutate store", async () => {
+  const files = [
+    "orders.json",
+    "daily-digitals.json",
+    "daily-missions.json",
+    "events.json",
+    "warehouse.json",
+    "trash.json",
+    "settings.json",
+    "work-runs.json",
+  ]
+  const before = files.map((name) => [name, rawDataFile(name)])
+
+  const res = await fetch(`${BASE}/admin`)
+  assert.equal(res.status, 200)
+  const page = await res.text()
+  assert.match(page, /Boss\/Admin Cockpit/)
+  assert.match(page, /autopilot ON/)
+  assert.match(page, /Next Operator Action/)
+  assert.match(page, /Orders Summary/)
+  assert.match(page, /Training Count/)
+  assert.match(page, /Warehouse Summary/)
+  assert.match(page, /Event Stream/)
+  assert.match(page, /Client Orders Control/)
+  assert.match(page, /Daily Training Review/)
+  assert.match(page, /Factory Workroom/)
+  assert.match(page, /Recent Work Runs/)
+  assert.match(page, /Factory is waiting for operator review|training quota/)
+
+  const alias = await fetch(`${BASE}/operator`)
+  assert.equal(alias.status, 200)
+  assert.match(await alias.text(), /Boss\/Admin Cockpit/)
+
+  const after = files.map((name) => [name, rawDataFile(name)])
+  assert.deepEqual(after, before, "GET /admin and /operator must not mutate the store")
+})
+
 test("valid department is still accepted (whitelist does not over-block)", async () => {
   const res = await fetch(`${BASE}/api/order`, {
     method: "POST",
@@ -96,6 +134,17 @@ test("valid department is still accepted (whitelist does not over-block)", async
   const orders = dataFile("orders.json") as { status: string }[]
   assert.equal(orders.length, 1)
   assert.equal(orders[0]!.status, "ready_for_review")
+
+  const admin = await (await fetch(`${BASE}/admin`)).text()
+  assert.match(admin, /GoodCo/)
+  assert.match(admin, /ready_for_review/)
+  assert.match(admin, /deliverable/)
+  assert.match(admin, /Client Orders Control - ready_for_review/)
+  assert.match(admin, /Daily Training Review/)
+  assert.match(admin, /Factory Workroom/)
+  assert.match(admin, /SA · Sales Producer/)
+  assert.match(admin, /client_order_production/)
+  assert.match(admin, /dd-order-/)
 })
 
 test("paused autopilot remains paused after a real server restart", async () => {
@@ -116,5 +165,7 @@ test("paused autopilot remains paused after a real server restart", async () => 
 
   const pageAfter = await (await fetch(`${BASE}/`)).text()
   assert.match(pageAfter, /autopilot OFF/, "pause must survive a restart")
+  const adminAfter = await (await fetch(`${BASE}/admin`)).text()
+  assert.match(adminAfter, /autopilot OFF/, "admin cockpit must show the persisted OFF state")
   assert.equal((dataFile("settings.json") as { autopilotEnabled: boolean }).autopilotEnabled, false)
 })

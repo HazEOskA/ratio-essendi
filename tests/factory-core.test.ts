@@ -541,6 +541,16 @@ test("autonomous cycle: open order → CLIENT_MODE, deliverable produced, no tra
     assert.equal(result.trainingCreated, 0, "client work must take priority over training")
     const training = store.getDailyDigitalsForDate("2026-07-01").filter((d) => !d.orderId)
     assert.equal(training.length, 0)
+    const run = store.getLastWorkRun()!
+    assert.equal(run.mode, "CLIENT_MODE")
+    assert.equal(run.status, "completed")
+    assert.equal(run.trigger, "manual")
+    assert.equal(run.nextOperatorAction, "Review client order")
+    assert.ok(run.outputsCreated.some((id) => id.startsWith("dd-order-")))
+    assert.ok(
+      run.steps.some((s) => s.agentId === "DA" && s.jobType === "client_order_production" && s.outputId),
+      "client mode work run must include the producer step with outputId",
+    )
   } finally {
     cleanup()
   }
@@ -554,6 +564,15 @@ test("autonomous cycle: no orders → NO_CLIENT_TRAINING_MODE with 5 random miss
     assert.equal(result.trainingCreated, 5)
     const training = store.getDailyDigitalsForDate("2026-07-01").filter((d) => !d.orderId)
     assert.equal(training.length, 5)
+    const run = store.getLastWorkRun()!
+    assert.equal(run.mode, "NO_CLIENT_TRAINING_MODE")
+    assert.equal(run.outputsCreated.length, 5)
+    for (const agentId of ["MA", "SA", "DA", "RA", "QAA"] as const) {
+      assert.ok(
+        run.steps.some((s) => s.agentId === agentId && s.jobType === "daily_training_mission" && s.outputId),
+        `${agentId} must have a training step with outputId`,
+      )
+    }
   } finally {
     cleanup()
   }
@@ -569,6 +588,11 @@ test("autonomous cycle: second run same day is IDLE (bounded, no queue spam)", a
     assert.equal(second.ordersProduced.length, 0)
     const training = store.getDailyDigitalsForDate("2026-07-01").filter((d) => !d.orderId)
     assert.equal(training.length, 5, "still exactly 5 — never more")
+    assert.equal(store.snapshot().workRuns.length, 2, "idle cycles are still recorded")
+    const idleRun = store.getLastWorkRun()!
+    assert.equal(idleRun.mode, "IDLE")
+    assert.match(idleRun.idleReason ?? "", /Factory is waiting for operator review|training quota/)
+    assert.equal(idleRun.outputsCreated.length, 0)
   } finally {
     cleanup()
   }
@@ -583,6 +607,7 @@ test("autonomous cycle: executes pending rework with feedback applied and bumps 
     reworkDigital(store, mkt.id, "too generic, make it concrete for construction companies")
 
     const result = await runAutonomousCycle(store, "2026-07-01")
+    assert.equal(result.mode, "REWORK_MODE")
     assert.ok(result.reworksRegenerated.includes(mkt.id))
     const regenerated = store.getDailyDigital(mkt.id)!
     assert.equal(regenerated.status, "draft_ready")
@@ -591,6 +616,9 @@ test("autonomous cycle: executes pending rework with feedback applied and bumps 
       regenerated.content.includes("construction"),
       "regenerated content must apply the operator feedback",
     )
+    const run = store.getLastWorkRun()!
+    assert.equal(run.mode, "REWORK_MODE")
+    assert.ok(run.steps.some((s) => s.agentId === "MA" && s.jobType === "training_rework" && s.outputId === mkt.id))
   } finally {
     cleanup()
   }
