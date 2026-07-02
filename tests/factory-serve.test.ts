@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url"
 import { tmpdir } from "node:os"
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
-const TSX = join(ROOT, "node_modules", ".bin", "tsx")
+const TSX_CLI = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs")
 const SERVER = join(ROOT, "tests", "factory-serve.ts")
 const PORT = 7871
 const BASE = `http://127.0.0.1:${PORT}`
@@ -21,7 +21,7 @@ const workDir = mkdtempSync(join(tmpdir(), "factory-serve-test-"))
 let child: ChildProcess | undefined
 
 async function startServer(): Promise<void> {
-  child = spawn(TSX, [SERVER], {
+  child = spawn(process.execPath, [TSX_CLI, SERVER], {
     cwd: workDir,
     env: { ...process.env, PORT: String(PORT) },
     stdio: "ignore",
