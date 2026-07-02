@@ -789,7 +789,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     const done = order.status === "approved" || order.status === "closed"
     const cls = order.status === "ready_for_review" ? "ready" : done ? "done" : order.status === "rejected" ? "bad" : ""
     return `
-<div class="admin-order ${cls}">
+<div class="admin-order ${cls}" id="${d ? `out-${E(d.id)}` : `order-${E(order.id)}`}">
   <div class="daily-header">
     ${badge(order.status, orderBadgeCls(order.status))}
     ${badge(order.department, "info")}
@@ -850,7 +850,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   }
 
   const renderTrainingItem = (item: DailyDigital): string => `
-<div class="admin-order ${item.status === "rejected" ? "bad" : item.status === "accepted" ? "done" : item.status === "needs_rework" ? "ready" : ""}">
+<div class="admin-order ${item.status === "rejected" ? "bad" : item.status === "accepted" ? "done" : item.status === "needs_rework" ? "ready" : ""}" id="out-${E(item.id)}">
   <div class="daily-header">
     ${badge(item.status, itemBadgeCls(item.status))}
     ${badge(item.department, "info")}
@@ -930,7 +930,7 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   <div class="line"><strong>Last job:</strong> ${E(step?.jobType ?? "none yet")}</div>
   <div class="line"><strong>Last input:</strong> ${step ? E(preview(step.inputSummary, 110)) : "—"}</div>
   <div class="line"><strong>Last output:</strong> ${E(step?.outputSummary ? preview(step.outputSummary, 110) : "No output recorded yet")}</div>
-  ${step?.outputId ? `<div class="line mono" style="font-size:11px"><strong>Output id:</strong> ${E(step.outputId)}</div>` : ""}
+  ${step?.outputId ? `<div class="line mono" style="font-size:11px"><strong>Output id:</strong> <a href="#out-${E(step.outputId)}">${E(step.outputId)}</a></div>` : ""}
   ${relatedOrder ? `<div class="line mono" style="font-size:11px"><strong>Related order:</strong> ${E(relatedOrder)}</div>` : ""}
   <div class="line"><strong>Next:</strong> ${E(next)}</div>
 </div>`
@@ -960,9 +960,14 @@ function renderAdmin(state: FactoryState, flash?: string): string {
       <p class="admin-sub">Operational control for factory-core v0.2.1. Autonomy of thinking without autonomy of action: the system can produce internal work, but the operator approves every external step.</p>
     </div>
     <div class="admin-mode">
-      ${badge(mode, mode === "CLIENT_MODE" ? "warn" : mode === "NO_CLIENT_TRAINING_MODE" ? "info" : "muted")}
+      ${badge(mode, mode === "CLIENT_MODE" ? "warn" : mode === "REWORK_MODE" ? "warn" : mode === "NO_CLIENT_TRAINING_MODE" ? "info" : "muted")}
       ${badge(autopilotEnabled ? "autopilot ON" : "autopilot OFF", autopilotEnabled ? "ok" : "bad")}
-      <span class="dim" style="font-size:12px">last cycle: ${E(lastCycleSummary)}</span>
+      ${badge("SAFE MODE — no external send", "ok")}
+      <span class="dim" style="font-size:12px">last cycle: ${lastRun
+        ? `${E(lastRun.mode)} · ${E(lastRun.status)} · via ${E(lastRun.trigger)} · ${E(lastRun.finishedAt.slice(0, 19).replace("T", " "))}`
+        : "none recorded yet"}</span>
+      <span class="dim" style="font-size:12px">next: ${E(nextAction[0])}</span>
+      <span class="dim" style="font-size:11px">local single-instance · nothing leaves the factory without operator approval</span>
     </div>
   </section>
 
@@ -1101,11 +1106,44 @@ function renderAdmin(state: FactoryState, flash?: string): string {
           </tbody>
         </table>
         ${readyOrders.length + pendingTraining.length + reworkItems.length > 0 ? `
-        <ul class="wait-items">
-          ${readyOrders.map((o) => `<li><span class="mono">${E(o.deliverableId ?? o.id)}</span> — ${E(o.clientName)} (${E(o.department)}): Approve → Warehouse / Request Rework / Reject — <a href="#orders-review">open</a></li>`).join("")}
-          ${pendingTraining.slice(0, 6).map((d) => `<li><span class="mono">${E(d.id)}</span> — ${E(d.department)} training: Accept / Warehouse / Rework / Reject — <a href="#training-review">open</a></li>`).join("")}
-          ${reworkItems.map((d) => `<li><span class="mono">${E(d.id)}</span> — flagged needs_rework${d.operatorFeedback ? `: "${E(preview(d.operatorFeedback, 70))}"` : ""} — regenerates on next cycle</li>`).join("")}
-        </ul>` : ""}
+        <table class="admin-table" style="margin-top:10px">
+          <thead><tr><th>Item</th><th>Output</th><th>Source</th><th>Producer</th><th>Dept</th><th>Score</th><th>Rev</th><th>Next safe action</th></tr></thead>
+          <tbody>
+            ${readyOrders.map((o) => {
+              const d = deliverableFor(o)
+              return `<tr>
+                <td>${E(o.clientName)}</td>
+                <td class="mono">${d ? `<a href="#out-${E(d.id)}">${E(d.id)}</a>` : "—"}</td>
+                <td>${badge("client", "warn")}</td>
+                <td class="mono">${E(d?.createdByAgentId ?? "—")}</td>
+                <td>${E(o.department)}</td>
+                <td class="mono">${d?.qualityScore ?? "—"}</td>
+                <td class="mono">${d?.revisionCount ?? 0}</td>
+                <td class="dim" style="font-size:11.5px"><a href="#${d ? `out-${E(d.id)}` : "orders-review"}">Approve → Warehouse · Rework · Reject</a></td>
+              </tr>`
+            }).join("")}
+            ${pendingTraining.slice(0, 8).map((d) => `<tr>
+                <td>${E(preview(d.title, 46))}</td>
+                <td class="mono"><a href="#out-${E(d.id)}">${E(d.id)}</a></td>
+                <td>${badge("training", "muted")}</td>
+                <td class="mono">${E(d.createdByAgentId)}</td>
+                <td>${E(d.department)}</td>
+                <td class="mono">${d.qualityScore}</td>
+                <td class="mono">${d.revisionCount}</td>
+                <td class="dim" style="font-size:11.5px"><a href="#out-${E(d.id)}">Accept · Warehouse · Rework · Reject</a></td>
+              </tr>`).join("")}
+            ${reworkItems.map((d) => `<tr>
+                <td>${E(preview(d.title, 46))}</td>
+                <td class="mono"><a href="#out-${E(d.id)}">${E(d.id)}</a></td>
+                <td>${badge("rework", "warn")}</td>
+                <td class="mono">${E(d.createdByAgentId)}</td>
+                <td>${E(d.department)}</td>
+                <td class="mono">${d.qualityScore}</td>
+                <td class="mono">${d.revisionCount}</td>
+                <td class="dim" style="font-size:11.5px">Regenerates on next cycle — use "Run Training Cycle"</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>` : ""}
       </div>
     </div>
   </section>
@@ -1302,6 +1340,7 @@ const server = createServer(async (req, res) => {
             revisionCount: o.revisionCount,
             updatedAt: o.updatedAt,
           })),
+          latestWorkRun: state.workRuns[state.workRuns.length - 1] ?? null,
           workRunsSummary: [...state.workRuns].reverse().slice(0, 10).map((r) => ({
             id: r.id,
             mode: r.mode,

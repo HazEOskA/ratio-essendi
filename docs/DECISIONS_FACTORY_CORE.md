@@ -71,3 +71,7 @@ The system is synchronous. Agent work cards therefore report only truthful deriv
 ## FC-018 — Debug Endpoints Are Read-Only
 
 `GET /api/admin/state` and `GET /api/work-runs` exist to verify cockpit correctness. They read a snapshot and return JSON; they perform no writes and add no external capability. Write paths remain the existing operator forms only.
+
+## FC-019 — The Boss Header Reads Persisted History, Not Process Memory
+
+The cockpit header derives "last cycle" (mode, status, trigger, finish time) from the last persisted `FactoryWorkRun`, never from an in-memory summary string. A restart must not make the factory look like it never worked — that was the operator's core "hollow shell" complaint. The header also carries the standing safety indicators: `SAFE MODE — no external send` and `local single-instance`, because the boss should see the safety posture without reading docs. Every output card has a stable `#out-<id>` anchor; agent cards and the operator queue link to it, so "which agent produced what" is one click, not a scroll hunt.

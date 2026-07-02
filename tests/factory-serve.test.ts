@@ -119,6 +119,14 @@ test("admin cockpit renders required sections and GET does not mutate store", as
   assert.match(page, /Last input:/)
   assert.match(page, /Last job:/)
   assert.match(page, /waiting_review/)
+  // Boss status header: safe-mode indicator + persisted last cycle info
+  assert.match(page, /SAFE MODE — no external send/)
+  assert.match(page, /local single-instance/)
+  assert.match(page, /last cycle: NO_CLIENT_TRAINING_MODE · completed · via startup/)
+  assert.doesNotMatch(page, /none recorded yet/)
+  // Operator queue is an actionable table, not a bare list
+  assert.match(page, /Next safe action/)
+  assert.match(page, /href="#out-dd-/)
 
   const alias = await fetch(`${BASE}/operator`)
   assert.equal(alias.status, 200)
@@ -157,6 +165,9 @@ test("valid department is still accepted (whitelist does not over-block)", async
   assert.match(admin, /Related order:/)
   assert.match(admin, /Output id:/)
   assert.match(admin, /Review client order/)
+  // Output id links to the output card anchor; queue row carries the producer
+  assert.match(admin, /href="#out-dd-order-/)
+  assert.match(admin, /id="out-dd-order-/)
 })
 
 test("training visibility: 5/5 quota, every producer agent attributed, separated from client outputs", async () => {
@@ -227,6 +238,7 @@ test("GET /api/admin/state is read-only and returns useful cockpit state", async
     waiting: { ordersReadyForReview: number; trainingDrafts: number; needsRework: number; pendingApprovals: number }
     counts: { orders: number; workRuns: number; trainingToday: string }
     orders: { id: string; status: string }[]
+    latestWorkRun: { id: string; mode: string; steps: { agentId: string; inputSummary: string }[] } | null
     workRunsSummary: { id: string; mode: string; steps: number; nextOperatorAction: string }[]
   }
   assert.equal(body.autopilotEnabled, true)
@@ -235,6 +247,8 @@ test("GET /api/admin/state is read-only and returns useful cockpit state", async
   assert.ok(body.waiting.ordersReadyForReview >= 1)
   assert.equal(body.counts.trainingToday, "5/5")
   assert.ok(body.orders.length >= 1)
+  assert.ok(body.latestWorkRun, "latestWorkRun must be exposed")
+  assert.ok(body.latestWorkRun!.steps.length >= 1, "latestWorkRun must include full steps")
   assert.ok(body.workRunsSummary.length >= 1)
   assert.ok(body.workRunsSummary[0]!.steps >= 1)
 
@@ -298,6 +312,10 @@ test("paused autopilot remains paused after a real server restart", async () => 
   const adminAfter = await (await fetch(`${BASE}/admin`)).text()
   assert.match(adminAfter, /autopilot OFF/, "admin cockpit must show the persisted OFF state")
   assert.match(adminAfter, /Factory is paused because autopilot is OFF/, "standing-still reason must explain the pause")
+  // Boss header must survive the restart from persisted work runs, not an
+  // in-memory summary string: last run before restart was the rework cycle.
+  assert.match(adminAfter, /last cycle: REWORK_MODE · completed · via daily_run/)
+  assert.doesNotMatch(adminAfter, /none recorded yet/)
   assert.equal((dataFile("settings.json") as { autopilotEnabled: boolean }).autopilotEnabled, false)
 
   // Paused + drafts pending: next action must point at the review queue, NOT
