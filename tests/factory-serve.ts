@@ -36,6 +36,9 @@ import type {
   DailyDigital,
   DailyDigitalDepartment,
   ClientOrder,
+  FactoryWorkRun,
+  MissionAgentId,
+  FactoryWorkRunTrigger,
 } from "@ratio-essendi/factory-core"
 import { randomUUID } from "node:crypto"
 
@@ -156,6 +159,7 @@ button.bad{background:#3a1418;color:#f85149;border-color:#5a1e23}
 .admin-card .v{font-size:24px;font-weight:800}
 .admin-card .l{font-size:10px;color:#a9b7c5;text-transform:uppercase;letter-spacing:.7px;margin-top:2px}
 .admin-panel{border-radius:8px;padding:14px}
+.admin-subpanel{background:#0b1119;border:1px solid #263241;border-radius:8px;padding:12px}
 .admin-panel.hot{border-color:rgba(255,184,0,.5);background:linear-gradient(135deg,rgba(52,39,10,.82),rgba(13,17,23,.92))}
 .admin-panel.danger{border-color:rgba(248,81,73,.55)}
 .admin-panel h2{margin-top:0;color:#f5fbff}
@@ -177,13 +181,23 @@ button.bad{background:#3a1418;color:#f85149;border-color:#5a1e23}
 .admin-safety{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .admin-safety ul{margin:0;padding-left:18px;color:#a9b7c5;font-size:12.5px}
 .admin-safety li{margin:4px 0}
+.workroom-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.work-agent{background:#0b1119;border:1px solid #263241;border-radius:8px;padding:11px;min-height:138px}
+.work-agent.active{border-color:rgba(0,245,255,.55)}.work-agent.waiting{border-color:rgba(255,184,0,.45)}.work-agent.failed{border-color:rgba(248,81,73,.55)}
+.work-agent .name{font-weight:800;color:#f5fbff;margin-bottom:4px}
+.work-agent .meta{font-size:11px;color:#a9b7c5;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.work-agent .line{font-size:12px;color:#dbe7f0;margin-top:5px}
+.timeline{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.timeline-step{background:#070b11;border:1px solid #263241;border-left:3px solid #00f5ff;border-radius:8px;padding:10px}
+.timeline-step.failed{border-left-color:#f85149}.timeline-step.skipped{border-left-color:#8b949e}
+.idle-box{background:rgba(52,39,10,.55);border:1px solid rgba(255,184,0,.42);border-radius:8px;padding:12px;color:#f0d28a}
 @media (max-width:860px){
   .admin-hero,.admin-two,.admin-safety{grid-template-columns:1fr}
-  .admin-grid,.admin-three{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .admin-grid,.admin-three,.workroom-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .admin-input-row{grid-template-columns:1fr}
 }
 @media (max-width:560px){
-  .admin-grid,.admin-three{grid-template-columns:1fr}
+  .admin-grid,.admin-three,.workroom-grid{grid-template-columns:1fr}
   .admin-title{font-size:24px}
   .admin-hero{padding:14px}
 }
@@ -781,6 +795,70 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     )
     .slice(0, 18)
 
+  type WorkroomAgentId = MissionAgentId | "N"
+  const workroomAgents: WorkroomAgentId[] = ["N", "MA", "SA", "DA", "RA", "QAA"]
+  const agentNames: Record<WorkroomAgentId, string> = {
+    N: "Factory Director",
+    MA: "Marketing Producer",
+    SA: "Sales Producer",
+    DA: "Delivery Producer",
+    RA: "Research Producer",
+    QAA: "QA Producer",
+  }
+  const lastRun = state.workRuns[state.workRuns.length - 1]
+  const recentRuns = [...state.workRuns].reverse().slice(0, 8)
+  const runStepPairs = [...state.workRuns]
+    .reverse()
+    .flatMap((run) => run.steps.map((step) => ({ run, step })))
+  const latestStepFor = (agentId: WorkroomAgentId) => runStepPairs.find((x) => x.step.agentId === agentId)
+  const waitingOperatorCount = readyOrders.length + pendingTraining.length + pendingApprovalCount
+  const visibleIdleReason = lastRun?.idleReason
+    ?? (waitingOperatorCount > 0 ? "Factory is waiting for operator review." : "No idle cycle recorded yet.")
+
+  const renderWorkAgent = (agentId: WorkroomAgentId): string => {
+    const latest = latestStepFor(agentId)
+    const step = latest?.step
+    const status = latest?.run.status === "failed"
+      ? "failed"
+      : step?.status === "completed"
+        ? "active"
+        : step?.status ?? "waiting"
+    const lastOutput = step?.outputId
+      ? step.outputId
+      : step?.outputSummary
+        ? preview(step.outputSummary, 90)
+        : "No output recorded yet"
+    const next = agentId === "N"
+      ? lastRun?.nextOperatorAction ?? nextAction[0]
+      : step?.outputId
+        ? "Waiting for operator review"
+        : "Waiting for a matching order, rework, or training slot"
+
+    return `
+<div class="work-agent ${status === "failed" ? "failed" : status === "active" ? "active" : "waiting"}">
+  <div class="name">${E(agentId)} · ${E(agentNames[agentId])}</div>
+  <div class="meta">${E(status)}${step?.department ? ` · ${E(step.department)}` : ""}</div>
+  <div class="line"><strong>Last job:</strong> ${E(step?.jobType ?? "none yet")}</div>
+  <div class="line"><strong>Last output:</strong> ${E(lastOutput)}</div>
+  <div class="line"><strong>Next:</strong> ${E(next)}</div>
+</div>`
+  }
+
+  const renderStep = (step: FactoryWorkRun["steps"][number]): string => `
+<div class="timeline-step ${step.status}">
+  <div class="daily-header">
+    ${badge(step.agentId, "info")}
+    ${badge(step.status, step.status === "failed" ? "bad" : step.status === "skipped" ? "muted" : "ok")}
+    <span class="daily-title">${E(step.agentName)}</span>
+    <span class="dim" style="font-size:11px">${E(step.jobType)}</span>
+  </div>
+  <div class="dim" style="font-size:12px"><strong>Input:</strong> ${E(step.inputSummary)}</div>
+  ${step.outputSummary ? `<div class="dim" style="font-size:12px;margin-top:4px"><strong>Output:</strong> ${E(step.outputSummary)}</div>` : ""}
+  ${step.outputId ? `<div class="dim mono" style="font-size:11px;margin-top:4px">outputId: ${E(step.outputId)}</div>` : ""}
+  ${step.constraintsApplied?.length ? `<div class="dim" style="font-size:11px;margin-top:4px">constraints: ${E(step.constraintsApplied.join(" | "))}</div>` : ""}
+  <div class="dim mono" style="font-size:10.5px;margin-top:4px">${E(step.startedAt.slice(11, 19))} -> ${E(step.finishedAt.slice(11, 19))}</div>
+</div>`
+
   return layout("Boss/Admin Cockpit", "/admin", `
 <div class="admin-shell">
   <section class="admin-hero">
@@ -893,6 +971,62 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     <div class="admin-list">
       ${trainingItems.length === 0 ? '<p class="dim">No training-only assets yet.</p>' : [...trainingItems].reverse().slice(0, 12).map(renderTrainingItem).join("")}
     </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Factory Workroom</h2>
+    <div class="admin-three" style="margin-bottom:10px">
+      <div class="stat"><div class="v ${lastRun?.status === "failed" ? "bad" : lastRun ? "ok" : "muted"}">${E(lastRun?.status ?? "none")}</div><div class="l">Last cycle status</div></div>
+      <div class="stat"><div class="v info">${E(lastRun?.mode ?? mode)}</div><div class="l">Last mode</div></div>
+      <div class="stat"><div class="v warn">${lastRun?.steps.length ?? 0}</div><div class="l">Agent steps</div></div>
+    </div>
+    <div class="idle-box" style="margin-bottom:10px">
+      <strong>${E(visibleIdleReason)}</strong>
+      <div class="dim" style="font-size:12px;margin-top:4px">Next operator action: ${E(lastRun?.nextOperatorAction ?? nextAction[0])}</div>
+    </div>
+    <div class="workroom-grid" style="margin-bottom:12px">
+      ${workroomAgents.map(renderWorkAgent).join("")}
+    </div>
+    <div class="admin-two">
+      <div class="admin-subpanel">
+        <h2>Last Work Run Timeline</h2>
+        ${lastRun ? `
+          <p class="dim" style="font-size:12px;margin-bottom:8px">${E(lastRun.id)} · ${E(lastRun.trigger)} · ${E(lastRun.mode)} · ${E(lastRun.startedAt.slice(0, 19).replace("T", " "))} -> ${E(lastRun.finishedAt.slice(11, 19))} · outputs ${lastRun.outputsCreated.length}</p>
+          <div class="timeline">${lastRun.steps.map(renderStep).join("")}</div>
+        ` : '<p class="dim">No autonomous cycle has recorded work yet.</p>'}
+      </div>
+      <div class="admin-subpanel">
+        <h2>Waiting for Operator</h2>
+        <p class="dim" style="font-size:12px;margin-bottom:8px">${waitingOperatorCount > 0 ? "Factory is waiting for operator review." : "No operator review blocker right now."}</p>
+        <table class="admin-table">
+          <tbody>
+            <tr><th>Client orders ready for review</th><td>${readyOrders.length}</td></tr>
+            <tr><th>Training drafts waiting</th><td>${pendingTraining.length}</td></tr>
+            <tr><th>Reworks waiting</th><td>${reworkItems.length}</td></tr>
+            <tr><th>Pipeline approval items</th><td>${pendingApprovalCount}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="admin-panel">
+    <h2>Recent Work Runs</h2>
+    ${recentRuns.length === 0 ? '<p class="dim">No work runs recorded yet.</p>' : `
+    <table class="admin-table">
+      <thead><tr><th>Run</th><th>Started</th><th>Mode</th><th>Trigger</th><th>Steps</th><th>Outputs</th><th>Next Operator Action</th></tr></thead>
+      <tbody>
+        ${recentRuns.map((run) => `<tr>
+          <td class="mono dim">${E(run.id)}</td>
+          <td class="mono dim">${E(run.startedAt.slice(0, 16).replace("T", " "))}</td>
+          <td>${badge(run.mode, run.mode === "IDLE" ? "muted" : run.mode === "REWORK_MODE" ? "warn" : "info")}</td>
+          <td>${E(run.trigger)}</td>
+          <td class="mono">${run.steps.length}</td>
+          <td class="mono">${run.outputsCreated.length}</td>
+          <td class="dim" style="font-size:12px">${E(run.nextOperatorAction)}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`}
   </section>
 
   <section class="admin-panel">
@@ -1139,7 +1273,7 @@ const server = createServer(async (req, res) => {
 
       if (action === "run") {
         try {
-          const result = await runAutonomousCycle(store, date)
+          const result = await runAutonomousCycle(store, date, "daily_run")
           lastCycleSummary = `${result.mode}: training=${result.trainingCreated} orders=${result.ordersProduced.length} reworks=${result.reworksRegenerated.length}`
           return respond(`Cycle done — ${lastCycleSummary}`)
         } catch (err) {
@@ -1197,7 +1331,7 @@ const server = createServer(async (req, res) => {
         ...(contact ? { contact } : {}),
       })
       // Produce immediately — the client should not wait for the next timer tick.
-      const result = await runAutonomousCycle(store)
+      const result = await runAutonomousCycle(store, undefined, "order_created")
       lastCycleSummary = `${result.mode}: orders=${result.ordersProduced.length}`
       if (returnToAdmin) {
         return html(res, renderAdmin(store.snapshot(), `Order ${order.id} accepted and produced — review the deliverable below.`))
@@ -1232,10 +1366,10 @@ const server = createServer(async (req, res) => {
 
 // --- Autopilot loop: client orders first, training when idle, always bounded ---
 
-async function autopilotTick(): Promise<void> {
+async function autopilotTick(trigger: FactoryWorkRunTrigger = "timer"): Promise<void> {
   if (!autopilotEnabled) return
   try {
-    const r = await runAutonomousCycle(store)
+    const r = await runAutonomousCycle(store, undefined, trigger)
     lastCycleSummary = `${r.mode}: training=${r.trainingCreated} orders=${r.ordersProduced.length} reworks=${r.reworksRegenerated.length}`
     if (r.ordersProduced.length + r.reworksRegenerated.length + r.trainingCreated > 0) {
       console.log(`[autopilot] ${lastCycleSummary}`)
@@ -1245,7 +1379,7 @@ async function autopilotTick(): Promise<void> {
   }
 }
 
-setInterval(autopilotTick, 60_000)
+setInterval(() => void autopilotTick("timer"), 60_000)
 
 server.listen(PORT, () => {
   console.log(`\nFactory Core v0.2 — http://localhost:${PORT}`)
@@ -1260,5 +1394,5 @@ server.listen(PORT, () => {
   console.log("  /daily-review  — NO_CLIENT_TRAINING_MODE daily review")
   console.log("\nAutopilot: ON (60s cycle) — orders → reworks → 5 random daily training missions.")
   console.log("Press Ctrl+C to stop.\n")
-  void autopilotTick()
+  void autopilotTick("startup")
 })

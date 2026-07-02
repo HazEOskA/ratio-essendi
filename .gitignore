@@ -11,6 +11,7 @@ dashboard.html
 
 # persisted runtime state
 .data/
+.factory-data/
 
 # logs
 *.log

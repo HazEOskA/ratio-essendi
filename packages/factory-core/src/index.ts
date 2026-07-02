@@ -25,6 +25,10 @@ export type {
   ClientOrder,
   OrderStatus,
   FactoryMode,
+  FactoryWorkRunTrigger,
+  AgentWorkStepStatus,
+  AgentWorkStep,
+  FactoryWorkRun,
   CycleResult,
 } from "./types.js"
 

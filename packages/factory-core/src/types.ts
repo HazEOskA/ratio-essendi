@@ -205,7 +205,39 @@ export type ClientOrder = {
 
 // --- Autonomous cycle ---
 
-export type FactoryMode = "CLIENT_MODE" | "NO_CLIENT_TRAINING_MODE" | "IDLE"
+export type FactoryMode = "CLIENT_MODE" | "REWORK_MODE" | "NO_CLIENT_TRAINING_MODE" | "IDLE"
+
+export type FactoryWorkRunTrigger = "startup" | "timer" | "manual" | "order_created" | "daily_run"
+
+export type AgentWorkStepStatus = "started" | "completed" | "skipped" | "failed"
+
+export type AgentWorkStep = {
+  id: string
+  agentId: AgentId
+  agentName: string
+  department?: DailyDigitalDepartment
+  jobType: string
+  status: AgentWorkStepStatus
+  inputSummary: string
+  outputSummary?: string
+  outputId?: string
+  startedAt: string
+  finishedAt: string
+  constraintsApplied?: string[]
+}
+
+export type FactoryWorkRun = {
+  id: string
+  startedAt: string
+  finishedAt: string
+  mode: FactoryMode
+  status: "running" | "completed" | "failed"
+  trigger: FactoryWorkRunTrigger
+  steps: AgentWorkStep[]
+  outputsCreated: string[]
+  idleReason?: string
+  nextOperatorAction: string
+}
 
 export type CycleResult = {
   mode: FactoryMode
@@ -227,4 +259,5 @@ export type FactoryState = {
   dailyMissions: DailyMission[]
   feedbackEvents: FeedbackEvent[]
   orders: ClientOrder[]
+  workRuns: FactoryWorkRun[]
 }

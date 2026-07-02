@@ -92,6 +92,7 @@ test("admin cockpit renders required sections and GET does not mutate store", as
     "warehouse.json",
     "trash.json",
     "settings.json",
+    "work-runs.json",
   ]
   const before = files.map((name) => [name, rawDataFile(name)])
 
@@ -107,6 +108,9 @@ test("admin cockpit renders required sections and GET does not mutate store", as
   assert.match(page, /Event Stream/)
   assert.match(page, /Client Orders Control/)
   assert.match(page, /Daily Training Review/)
+  assert.match(page, /Factory Workroom/)
+  assert.match(page, /Recent Work Runs/)
+  assert.match(page, /Factory is waiting for operator review|training quota/)
 
   const alias = await fetch(`${BASE}/operator`)
   assert.equal(alias.status, 200)
@@ -137,6 +141,10 @@ test("valid department is still accepted (whitelist does not over-block)", async
   assert.match(admin, /deliverable/)
   assert.match(admin, /Client Orders Control - ready_for_review/)
   assert.match(admin, /Daily Training Review/)
+  assert.match(admin, /Factory Workroom/)
+  assert.match(admin, /SA · Sales Producer/)
+  assert.match(admin, /client_order_production/)
+  assert.match(admin, /dd-order-/)
 })
 
 test("paused autopilot remains paused after a real server restart", async () => {
