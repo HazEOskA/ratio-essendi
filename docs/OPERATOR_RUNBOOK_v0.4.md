@@ -97,6 +97,46 @@ an active demo order.
   required before any async generator is introduced
 - Delivery pack is markdown, not PDF (v0.4 scope)
 
+## 11a. Agent Production Line (`/production-line`)
+
+`/production-line` is the production floor. It is an **honest synchronous
+projection** of the current state — the factory produces each deliverable in a
+single producer step, so there is no fake "agent currently running" animation.
+`/admin` carries a compact version with a link to the full page.
+
+**Station board** — 8 stations, each owned by an agent:
+Intake (N) → Research (RA) → Strategy (SA) → Content (MA) → Delivery (DA) →
+QA (QAA) → Packaging (N) → Operator Review (you). Because one producer builds
+the whole deliverable, upstream stations a run folds in read **skipped**, not
+fake work. Each station shows its status, task count, and last task.
+
+**Statuses:** `queued` (waiting to be produced), `completed`, `waiting_review`
+(sitting at the review gate — your move), `blocked` (flagged for rework, waiting
+for a cycle), `ready_for_operator` (a pack needs approve/warehouse), `idle`
+(nothing here), `skipped` (folded into the synchronous run).
+
+**Four lines below the board:**
+- **Client Line** — one task per order: client, service, station, output id,
+  next action
+- **Training Line** — today's 5 training tasks, each with its producing agent
+- **Rework Line** — flagged items with the operator feedback + constraints that
+  will be applied on the next cycle, and the revision count
+- **Delivery Pack Line** — pack creation → approve → warehouse path
+
+**From output to delivery pack:** review a client task on the Client Line →
+`Approve → Delivery Pack` (on /admin or /factory-run) → the pack appears on the
+Delivery Pack Line and `/delivery` → approve → warehouse → case record.
+
+**Demo/fake clients for testing:** the page has a "Create Demo Production Run"
+selector with four clearly-fictional clients (HVAC TestCo, BrightHire Agency,
+NeonBlocks Studio, Local Builder Pro), each mapped to a real service. Explicit
+click only, internal only, duplicate-guarded — use them to rehearse the whole
+line before real clients.
+
+**Safe / not automated:** the line only *shows* work; every write is still an
+operator button. Nothing is sent, published, or delivered. `/api/production-line`
+is a read-only JSON mirror of the same view.
+
 ## 12. Definition of done for a client run
 
 1. Order exists with a service and honest brief

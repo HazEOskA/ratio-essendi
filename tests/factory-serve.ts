@@ -35,6 +35,7 @@ import {
   approveDeliveryPack,
   warehouseDeliveryPack,
   renderPackMarkdown,
+  deriveProductionLine,
 } from "@ratio-essendi/factory-core"
 import type {
   FactoryState,
@@ -47,6 +48,9 @@ import type {
   FactoryWorkRunTrigger,
   DeliveryPack,
   OrderLanguage,
+  ProductionLineView,
+  AgentProductionTask,
+  AgentStationStatus,
 } from "@ratio-essendi/factory-core"
 import { randomUUID } from "node:crypto"
 
@@ -67,10 +71,37 @@ let lastCycleSummary = "not run yet"
 
 const VALID_DEPARTMENTS: readonly DailyDigitalDepartment[] = ["marketing", "sales", "delivery", "research", "qa"]
 
+// Named demo clients for rehearsing the production line. Explicit action only,
+// internal only — clearly fictional, never presented as real clients.
+type DemoClient = { key: string; clientName: string; serviceId: string; language: OrderLanguage; description: string }
+const DEMO_CLIENTS: DemoClient[] = [
+  { key: "hvac", clientName: "HVAC TestCo", serviceId: "svc-ai-workflow-audit", language: "EN",
+    description: "We install and maintain HVAC systems. We need a simple workflow to handle inbound leads, quote follow-ups, and maintenance plan objections." },
+  { key: "brighthire", clientName: "BrightHire Agency", serviceId: "svc-recruitment-ops-audit", language: "EN",
+    description: "We are a 12-person recruitment agency. Candidates go cold between screening and client submission and we lose placements to slow feedback." },
+  { key: "neonblocks", clientName: "NeonBlocks Studio", serviceId: "svc-social-pack", language: "EN",
+    description: "Indie game studio. We know we should post but never have content ready. Need a carousel pack about our build-in-public journey." },
+  { key: "builderpro", clientName: "Local Builder Pro", serviceId: "svc-landing-audit", language: "EN",
+    description: "Local construction firm. Our landing page gets visits from ads but almost no enquiry form submissions." },
+]
+
+/** Builds the production-line view using the same deriveOps truth as the cockpit. */
+function productionLineFor(state: FactoryState): ProductionLineView {
+  const ops = deriveOps(state)
+  return deriveProductionLine(state, {
+    mode: ops.mode,
+    autopilotEnabled,
+    nextOperatorAction: ops.nextActionTitle,
+    trainingToday: `${ops.trainingToday}/5`,
+  })
+}
+
 // --- HTML helpers ---
 
 const E = (s: unknown): string =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+const plPreview = (text: string, max = 60): string => (text.length > max ? `${text.slice(0, max)}...` : text)
 
 const badge = (text: string, cls: string): string =>
   `<span class="badge ${cls}">${E(text)}</span>`
@@ -80,6 +111,7 @@ const nav = (active: string): string => {
     ["/admin", "Admin"],
     ["/", "Factory"],
     ["/factory-run", "Factory Run"],
+    ["/production-line", "Production Line"],
     ["/orders", "Orders"],
     ["/delivery", "Delivery"],
     ["/leads", "Leads"],
@@ -205,6 +237,18 @@ button.bad{background:#3a1418;color:#f85149;border-color:#5a1e23}
 .run-drill{background:#0b1119;border:1px solid #263241;border-radius:8px;padding:8px 12px;margin-bottom:8px}
 .run-drill summary{cursor:pointer;font-size:12.5px;color:#dbe7f0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .run-drill[open]{border-color:rgba(0,245,255,.45)}
+.station-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.station{background:#0b1119;border:1px solid #263241;border-radius:8px;padding:11px;border-top:3px solid #30363d}
+.station.completed{border-top-color:#3fb950}.station.waiting_review{border-top-color:#d29922}.station.ready_for_operator{border-top-color:#58a6ff}
+.station.blocked{border-top-color:#f85149}.station.queued{border-top-color:#a371f7}.station.skipped{border-top-color:#8b949e;opacity:.7}.station.idle{opacity:.55}
+.station .sname{font-weight:800;color:#f5fbff;font-size:13px}
+.station .sagent{font-size:10.5px;color:#00f5ff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.station .spurpose{font-size:11px;color:#8b949e;margin-bottom:6px;min-height:28px}
+.station .sline{font-size:11.5px;color:#dbe7f0;margin-top:3px}
+.pl-task{background:#0b1119;border:1px solid #263241;border-radius:8px;border-left:3px solid #30363d;padding:10px;margin-bottom:8px}
+.pl-task.waiting_review{border-left-color:#d29922}.pl-task.blocked{border-left-color:#f85149}.pl-task.ready_for_operator{border-left-color:#58a6ff}.pl-task.completed{border-left-color:#3fb950}.pl-task.queued{border-left-color:#a371f7}.pl-task.skipped{border-left-color:#8b949e}
+@media (max-width:860px){.station-board{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.station-board{grid-template-columns:1fr}}
 .run-drill .drill-body{margin-top:8px;border-top:1px solid #263241;padding-top:8px}
 .wait-items{margin:8px 0 0;padding-left:18px;color:#a9b7c5;font-size:12px}
 .wait-items li{margin:3px 0}
@@ -1137,6 +1181,31 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   </section>
 
   <section class="admin-panel">
+    <h2>Agent Production Line</h2>
+    <p class="dim" style="font-size:12px;margin-bottom:8px">Compact view of the production floor. Full drilldown: <a href="/production-line" style="color:#58a6ff">/production-line</a></p>
+    ${(() => { const pl = productionLineFor(state); return `
+    <div class="admin-three" style="margin-bottom:10px">
+      <div class="stat"><div class="v info">${pl.activeClientOrders}</div><div class="l">Active client tasks</div></div>
+      <div class="stat"><div class="v ${pl.reworkLine.length ? "warn" : "ok"}">${pl.reworkLine.length}</div><div class="l">Rework tasks</div></div>
+      <div class="stat"><div class="v ${pl.deliveryPacks.draft + pl.deliveryPacks.approved ? "warn" : "ok"}">${pl.deliveryPacks.draft + pl.deliveryPacks.approved}</div><div class="l">Pack tasks waiting</div></div>
+      <div class="stat"><div class="v info">${E(pl.trainingToday)}</div><div class="l">Training today</div></div>
+    </div>
+    <table class="admin-table">
+      <thead><tr><th>Station</th><th>Agent</th><th>Status</th><th>Tasks</th><th>Last</th></tr></thead>
+      <tbody>
+        ${pl.stations.map((st) => `<tr>
+          <td>${E(st.name)}</td>
+          <td class="mono">${E(st.agentId)}</td>
+          <td>${badge(st.status, plStatusBadgeCls(st.status))}</td>
+          <td class="mono">${st.taskCount}</td>
+          <td class="dim" style="font-size:11.5px">${st.lastTask ? E(plPreview(st.lastTask.title, 46)) : "—"}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+    <p class="dim" style="font-size:12px;margin-top:6px">Next operator action: <strong>${E(pl.nextOperatorAction)}</strong></p>`})()}
+  </section>
+
+  <section class="admin-panel">
     <h2>Factory Workroom</h2>
     <div class="admin-three" style="margin-bottom:10px">
       <div class="stat"><div class="v ${lastRun?.status === "failed" ? "bad" : lastRun ? "ok" : "muted"}">${E(lastRun?.status ?? "none")}</div><div class="l">Last cycle status</div></div>
@@ -1527,6 +1596,119 @@ ${recentPacks.map((p) => `<tr>
 </div>`)
 }
 
+function plStatusBadgeCls(st: AgentStationStatus): string {
+  if (st === "completed") return "ok"
+  if (st === "waiting_review") return "warn"
+  if (st === "ready_for_operator") return "info"
+  if (st === "blocked") return "bad"
+  if (st === "queued") return "info"
+  return "muted"
+}
+
+function renderPlTask(t: AgentProductionTask): string {
+  return `
+<div class="pl-task ${t.status}">
+  <div class="daily-header">
+    ${badge(t.status, plStatusBadgeCls(t.status))}
+    ${badge(t.agentId, "info")}
+    ${badge(t.source, t.source === "client" ? "warn" : t.source === "rework" ? "bad" : t.source === "delivery_pack" ? "info" : "muted")}
+    <span class="daily-title">${E(t.title)}</span>
+    <span class="dim" style="font-size:11px">station: ${E(t.station)}${t.department ? ` · ${E(t.department)}` : ""}${typeof t.revisionCount === "number" ? ` · rev ${t.revisionCount}` : ""}${typeof t.qualityScore === "number" ? ` · score ${t.qualityScore}` : ""}</span>
+  </div>
+  <div class="dim" style="font-size:12px"><strong>Input:</strong> ${E(t.inputSummary)}</div>
+  <div class="dim" style="font-size:12px;margin-top:2px"><strong>Output:</strong> ${E(t.outputSummary)}</div>
+  ${t.outputId ? `<div class="dim mono" style="font-size:11px">output ${E(t.outputId)}${t.orderId ? ` · order ${E(t.orderId)}` : ""}${t.packId ? ` · pack ${E(t.packId)}` : ""}</div>` : ""}
+  ${t.constraintsApplied?.length ? `<div class="dim" style="font-size:11px;margin-top:2px">constraints: ${E(t.constraintsApplied.join(" | "))}</div>` : ""}
+  <div class="dim" style="font-size:11.5px;margin-top:3px"><strong>Next:</strong> ${E(t.nextOperatorAction)}${t.nextStation ? ` (→ ${E(t.nextStation)})` : ""}</div>
+</div>`
+}
+
+function renderProductionLine(state: FactoryState, flash?: string): string {
+  const pl = productionLineFor(state)
+  const flashHtml = flash ? `<div class="flash ${flash.startsWith("Error") ? "bad" : ""}">${E(flash)}</div>` : ""
+  const inputStyle = "background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:13px ui-sans-serif,sans-serif;padding:6px 10px"
+  const lineBlock = (title: string, tasks: AgentProductionTask[], empty: string): string => `
+<h2>${E(title)} (${tasks.length})</h2>
+${tasks.length === 0 ? `<p class="dim">${E(empty)}</p>` : tasks.map(renderPlTask).join("")}`
+
+  return layout("Production Line", "/production-line", `
+<h1>Agent Production Line</h1>
+<p class="sub">
+  ${badge(pl.mode, pl.mode === "IDLE" ? "muted" : "info")}
+  ${badge(pl.autopilotEnabled ? "autopilot ON" : "autopilot OFF", pl.autopilotEnabled ? "ok" : "bad")}
+  ${badge("SAFE MODE — no external send", "ok")}
+  <span class="dim" style="font-size:12px">honest synchronous view — no fake live agents</span>
+</p>
+${flashHtml}
+
+<section class="admin-grid" aria-label="Production Summary">
+  <div class="admin-card"><div class="v info">${pl.activeClientOrders}</div><div class="l">Active client orders</div></div>
+  <div class="admin-card"><div class="v info">${E(pl.trainingToday)}</div><div class="l">Training quota</div></div>
+  <div class="admin-card"><div class="v ${pl.deliveryPacks.draft + pl.deliveryPacks.approved ? "warn" : "ok"}">${pl.deliveryPacks.draft}/${pl.deliveryPacks.approved}/${pl.deliveryPacks.warehouseReady}</div><div class="l">Packs draft/appr/ready</div></div>
+  <div class="admin-card"><div class="v ${pl.reworkLine.length ? "warn" : "ok"}">${pl.reworkLine.length}</div><div class="l">Rework tasks</div></div>
+</section>
+
+<section class="admin-action">
+  <h2>Next Operator Action</h2>
+  <strong>${E(pl.nextOperatorAction)}</strong>
+</section>
+
+<h2>Station Board</h2>
+<div class="station-board">
+  ${pl.stations.map((st) => `
+  <div class="station ${st.status}">
+    <div class="sagent">${E(st.agentId)} · ${E(st.name)}</div>
+    <div class="sname">${badge(st.status, plStatusBadgeCls(st.status))} <span class="dim" style="font-size:11px">${st.taskCount} task${st.taskCount === 1 ? "" : "s"}</span></div>
+    <div class="spurpose">${E(st.purpose)}</div>
+    ${st.lastTask ? `
+      <div class="sline"><strong>Last:</strong> ${E(plPreview(st.lastTask.title, 60))}</div>
+      <div class="sline dim">${E(st.lastTask.nextOperatorAction)}</div>
+    ` : `<div class="sline dim">No task on this station.</div>`}
+  </div>`).join("")}
+</div>
+
+<div class="form-card">
+  <label>Create Demo Production Run — explicit, internal, clearly fictional clients</label>
+  <form method="POST" action="/api/demo-order">
+    <input type="hidden" name="returnTo" value="/production-line">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select name="demo" style="${inputStyle}">
+        ${DEMO_CLIENTS.map((d) => `<option value="${E(d.key)}">${E(d.clientName)} — ${E(d.serviceId)}</option>`).join("")}
+      </select>
+      <button type="submit">Create Demo Production Run</button>
+    </div>
+  </form>
+  <div class="admin-actions" style="margin-top:8px">
+    <form method="POST" action="/api/daily"><input type="hidden" name="returnTo" value="/production-line"><input type="hidden" name="action" value="run"><button type="submit">Run Cycle Now</button></form>
+  </div>
+</div>
+
+${lineBlock("Client Line", pl.clientLine, "No client orders yet — create a demo production run above.")}
+${lineBlock("Training Line", pl.trainingLine, "No training tasks today. Run a cycle with no open client orders.")}
+${lineBlock("Rework Line", pl.reworkLine, "Nothing flagged for rework.")}
+${lineBlock("Delivery Pack Line", pl.deliveryPackLine, "No delivery packs yet — approve a client output to a pack.")}
+
+<h2>Recent Runs</h2>
+${state.workRuns.length === 0 ? '<p class="dim">No production runs recorded yet.</p>' : [...state.workRuns].reverse().slice(0, 6).map((run) => `
+<details class="run-drill">
+  <summary>
+    <span class="mono dim">${E(run.id)}</span>
+    ${badge(run.mode, run.mode === "IDLE" ? "muted" : "info")}
+    ${badge(run.status, run.status === "failed" ? "bad" : "ok")}
+    <span class="dim" style="font-size:11.5px">via ${E(run.trigger)} · ${E(run.startedAt.slice(0, 19).replace("T", " "))} · ${run.steps.length} step${run.steps.length === 1 ? "" : "s"} · ${run.outputsCreated.length} output${run.outputsCreated.length === 1 ? "" : "s"}</span>
+  </summary>
+  <div class="drill-body">
+    <div class="dim" style="font-size:12px">Next operator action: ${E(run.nextOperatorAction)}</div>
+    ${run.steps.map((step) => `<div class="pl-task ${step.status === "completed" ? "completed" : step.status === "failed" ? "blocked" : "skipped"}">
+      <div class="daily-header">${badge(step.agentId, "info")} ${badge(step.status, step.status === "failed" ? "bad" : step.status === "skipped" ? "muted" : "ok")} <span class="daily-title">${E(step.agentName)}</span> <span class="dim" style="font-size:11px">${E(step.jobType)}</span></div>
+      <div class="dim" style="font-size:12px"><strong>Input:</strong> ${E(step.inputSummary)}</div>
+      ${step.outputSummary ? `<div class="dim" style="font-size:12px"><strong>Output:</strong> ${E(step.outputSummary)}</div>` : ""}
+      ${step.outputId ? `<div class="dim mono" style="font-size:11px">outputId: ${E(step.outputId)}</div>` : ""}
+    </div>`).join("")}
+  </div>
+</details>`).join("")}`)
+}
+
 function renderEvents(state: FactoryState): string {
   const events = [...state.events].reverse()
   return layout("Events", "/events", `
@@ -1609,6 +1791,7 @@ const server = createServer(async (req, res) => {
       if (url === "/admin" || url === "/operator") return html(res, renderAdmin(state))
       if (url === "/factory-run") return html(res, renderFactoryRun(state))
       if (url === "/delivery") return html(res, renderDelivery(state))
+      if (url === "/production-line") return html(res, renderProductionLine(state))
 
       // Read-only debug endpoints — no store mutation, JSON only (Phase 2).
       if (url === "/api/admin/state") {
@@ -1673,6 +1856,9 @@ const server = createServer(async (req, res) => {
           total: state.workRuns.length,
           workRuns: [...state.workRuns].reverse().slice(0, 20),
         })
+      }
+      if (url === "/api/production-line") {
+        return json(res, productionLineFor(state))
       }
       if (url === "/api/delivery-packs") {
         return json(res, {
@@ -1765,13 +1951,16 @@ const server = createServer(async (req, res) => {
       const date = params["date"] ?? new Date().toISOString().slice(0, 10)
       const returnToAdmin = params["returnTo"] === "/admin"
       const returnToRun = params["returnTo"] === "/factory-run"
+      const returnToPl = params["returnTo"] === "/production-line"
 
       // Order deliverables review here too — sync the order status afterwards
       // and send the operator back to the relevant review surface.
       const digitalBefore = store.getDailyDigital(id)
       const orderId = digitalBefore?.orderId
       const respond = (flash: string) =>
-        returnToRun
+        returnToPl
+          ? html(res, renderProductionLine(store.snapshot(), flash))
+          : returnToRun
           ? html(res, renderFactoryRun(store.snapshot(), flash))
           : returnToAdmin
           ? html(res, renderAdmin(store.snapshot(), flash))
@@ -1910,26 +2099,29 @@ const server = createServer(async (req, res) => {
 
     if (method === "POST" && url === "/api/demo-order") {
       const params = await readBody(req)
-      const returnToAdmin = params["returnTo"] === "/admin"
+      const returnTo = params["returnTo"] ?? ""
+      const demo = DEMO_CLIENTS.find((d) => d.key === (params["demo"] ?? "").trim()) ?? DEMO_CLIENTS[0]!
+      const respond = (flash: string) =>
+        returnTo === "/admin" ? html(res, renderAdmin(store.snapshot(), flash))
+        : returnTo === "/production-line" ? html(res, renderProductionLine(store.snapshot(), flash))
+        : html(res, renderFactoryRun(store.snapshot(), flash))
       // Explicit operator action only. Internal only. Never duplicated silently.
       const existing = store.snapshot().orders.find(
-        (o) => o.clientName === "HVAC TestCo" && (o.status === "new" || o.status === "in_production" || o.status === "ready_for_review"),
+        (o) => o.clientName === demo.clientName && (o.status === "new" || o.status === "in_production" || o.status === "ready_for_review"),
       )
       if (existing) {
-        const flash = `Demo order ${existing.id} is already active — review it instead of duplicating.`
-        return returnToAdmin ? html(res, renderAdmin(store.snapshot(), flash)) : html(res, renderFactoryRun(store.snapshot(), flash))
+        return respond(`Demo order ${existing.id} for ${demo.clientName} is already active — review it instead of duplicating.`)
       }
       const order = createOrder(store, {
-        clientName: "HVAC TestCo",
+        clientName: demo.clientName,
         department: "delivery",
-        serviceId: "svc-ai-workflow-audit",
-        language: "EN",
-        description: "We install and maintain HVAC systems. We need a simple workflow to handle inbound leads, quote follow-ups, and maintenance plan objections.",
+        serviceId: demo.serviceId,
+        language: demo.language,
+        description: demo.description,
       })
       const result = await runAutonomousCycle(store, undefined, "order_created")
       lastCycleSummary = `${result.mode}: orders=${result.ordersProduced.length}`
-      const flash = `Demo order ${order.id} created and produced — internal only, nothing was sent anywhere.`
-      return returnToAdmin ? html(res, renderAdmin(store.snapshot(), flash)) : html(res, renderFactoryRun(store.snapshot(), flash))
+      return respond(`Demo production run ${order.id} created for ${demo.clientName} (${demo.serviceId}) — internal only, nothing was sent anywhere.`)
     }
 
     if (method === "POST" && url === "/api/autopilot") {
@@ -1986,6 +2178,8 @@ server.listen(PORT, () => {
   console.log("  /factory-run  — run the whole business loop from one page")
   console.log("  /delivery     — delivery packs + case records")
   console.log("  /api/delivery-packs — read-only packs + cases (JSON)")
+  console.log("  /production-line — agent production floor view")
+  console.log("  /api/production-line — read-only production line (JSON)")
   console.log("  / or /factory  — pipeline overview + signal form + autopilot toggle")
   console.log("  /orders        — client orders: intake, production, review")
   console.log("  /leads         — qualified leads")

@@ -446,6 +446,133 @@ test("delivery pack flow: approve output → pack draft → approve → warehous
   assert.deepEqual(afterFiles, before, "GET /api/delivery-packs must not mutate the store")
 })
 
+test("production line: /production-line shows all 8 stations and all 6 agents", async () => {
+  const page = await (await fetch(`${BASE}/production-line`)).text()
+  assert.match(page, /Agent Production Line/)
+  for (const station of ["Intake", "Research", "Strategy", "Content", "Delivery", "QA", "Packaging", "Operator Review"]) {
+    assert.match(page, new RegExp(station), `station must be visible: ${station}`)
+  }
+  for (const agent of ["N ·", "RA ·", "SA ·", "MA ·", "DA ·", "QAA ·"]) {
+    assert.match(page, new RegExp(agent.replace("·", "·")), `agent must be visible: ${agent}`)
+  }
+  assert.match(page, /SAFE MODE — no external send/)
+  assert.match(page, /honest synchronous view/)
+  assert.match(page, /Station Board/)
+})
+
+test("production line: training line shows 5/5 today with per-agent attribution", async () => {
+  const page = await (await fetch(`${BASE}/production-line`)).text()
+  assert.match(page, /Training quota/)
+  assert.match(page, /5\/5/)
+  assert.match(page, /Training Line \(5\)/)
+  // training tasks carry a source badge and their producing agent
+  assert.match(page, /training/)
+  for (const agent of ["MA", "SA", "DA", "RA", "QAA"]) {
+    assert.match(page, new RegExp(`>${agent}<`), `training task by ${agent} must be visible`)
+  }
+})
+
+test("production line: client line shows demo client, service, path, output id, next action", async () => {
+  const page = await (await fetch(`${BASE}/production-line`)).text()
+  assert.match(page, /Client Line/)
+  assert.match(page, /HVAC TestCo/)
+  assert.match(page, /AI Workflow Audit \+ Mini Demo/)
+  assert.match(page, /GoodCo/)
+  // client task ties to its output + order and states the next operator action
+  assert.match(page, /station: (delivery|strategy)/)
+  assert.match(page, /output dd-order-/)
+  assert.match(page, /Next:/)
+})
+
+test("production line: rework line shows feedback, constraints, and revision after a cycle", async () => {
+  const orders = dataFile("orders.json") as { clientName: string; deliverableId?: string }[]
+  const goodCo = orders.find((o) => o.clientName === "GoodCo")!
+  const revBefore = (dataFile("daily-digitals.json") as { id: string; revisionCount: number }[])
+    .find((d) => d.id === goodCo.deliverableId)!.revisionCount
+
+  // Flag GoodCo's deliverable for rework with concrete feedback
+  const feedback = "Make it specific for a 10-person HVAC install team."
+  const rw = await fetch(`${BASE}/api/daily`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "rework", id: goodCo.deliverableId!, feedback, returnTo: "/production-line" }),
+  })
+  assert.equal(rw.status, 200)
+
+  // Before running the cycle, the rework line must show the flagged item + feedback
+  const flagged = await (await fetch(`${BASE}/production-line`)).text()
+  assert.match(flagged, /Rework Line \(1\)/)
+  assert.match(flagged, /Make it specific for a 10-person HVAC install team\./)
+  assert.match(flagged, /Operator feedback:|constraints:/)
+
+  // Run the cycle → regenerates; GoodCo returns to ready_for_review, rev bumped
+  const run = await fetch(`${BASE}/api/daily`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "run", returnTo: "/production-line" }),
+  })
+  assert.equal(run.status, 200)
+  const digitals = dataFile("daily-digitals.json") as { id: string; revisionCount: number; status: string }[]
+  const regenerated = digitals.find((d) => d.id === goodCo.deliverableId)!
+  assert.equal(regenerated.revisionCount, revBefore + 1, "revision count must increment by exactly one")
+  assert.equal(regenerated.status, "draft_ready")
+  const page = await (await fetch(`${BASE}/production-line`)).text()
+  assert.match(page, new RegExp(`rev ${revBefore + 1}`))
+})
+
+test("production line: delivery pack line shows the warehoused pack + packaging station", async () => {
+  const page = await (await fetch(`${BASE}/production-line`)).text()
+  assert.match(page, /Delivery Pack Line \(1\)/)
+  assert.match(page, /warehouse_ready|Packaging/)
+  assert.match(page, /pack-/)
+})
+
+test("admin: compact Agent Production Line section links to /production-line", async () => {
+  const admin = await (await fetch(`${BASE}/admin`)).text()
+  assert.match(admin, /Agent Production Line/)
+  assert.match(admin, /href="\/production-line"/)
+  assert.match(admin, /Active client tasks/)
+  assert.match(admin, /Rework tasks/)
+  assert.match(admin, /Pack tasks waiting/)
+  // the compact station table renders all stations
+  assert.match(admin, /Operator Review/)
+})
+
+test("/api/production-line is read-only and returns a useful production view", async () => {
+  const files = ["orders.json", "daily-digitals.json", "events.json", "work-runs.json", "delivery-packs.json", "case-records.json"]
+  const before = files.map((name) => [name, rawDataFile(name)])
+
+  const res = await fetch(`${BASE}/api/production-line`)
+  assert.equal(res.status, 200)
+  assert.match(res.headers.get("content-type") ?? "", /application\/json/)
+  const body = (await res.json()) as {
+    mode: string; safeMode: boolean; trainingToday: string; nextOperatorAction: string
+    stations: { id: string; agentId: string; status: string }[]
+    clientLine: { clientName?: string; source: string }[]
+    trainingLine: unknown[]; reworkLine: unknown[]; deliveryPackLine: unknown[]
+    deliveryPacks: { warehouseReady: number }
+  }
+  assert.equal(body.safeMode, true)
+  assert.equal(body.stations.length, 8)
+  assert.ok(body.stations.some((st) => st.id === "operator_review"))
+  assert.ok(body.trainingLine.length >= 5)
+  assert.ok(body.clientLine.some((t) => t.clientName === "HVAC TestCo"))
+  assert.ok(body.deliveryPacks.warehouseReady >= 1)
+  assert.ok(body.nextOperatorAction.length > 3)
+
+  const after = files.map((name) => [name, rawDataFile(name)])
+  assert.deepEqual(after, before, "GET /api/production-line must not mutate the store")
+})
+
+test("GET /production-line does not mutate the store", async () => {
+  const files = ["orders.json", "daily-digitals.json", "events.json", "work-runs.json", "delivery-packs.json", "case-records.json"]
+  const before = files.map((name) => [name, rawDataFile(name)])
+  const res = await fetch(`${BASE}/production-line`)
+  assert.equal(res.status, 200)
+  const after = files.map((name) => [name, rawDataFile(name)])
+  assert.deepEqual(after, before, "GET /production-line must not mutate the store")
+})
+
 test("paused autopilot remains paused after a real server restart", async () => {
   // Clear the ready order first so the paused state has ONLY training drafts
   // pending — the exact scenario where "resume autopilot" would be misleading.
@@ -479,8 +606,9 @@ test("paused autopilot remains paused after a real server restart", async () => 
   assert.match(adminAfter, /autopilot OFF/, "admin cockpit must show the persisted OFF state")
   assert.match(adminAfter, /Factory is paused because autopilot is OFF/, "standing-still reason must explain the pause")
   // Boss header must survive the restart from persisted work runs, not an
-  // in-memory summary string: last run before restart was the demo-order cycle.
-  assert.match(adminAfter, /last cycle: CLIENT_MODE · completed · via order_created/)
+  // in-memory summary string: the last run before restart was the rework cycle
+  // triggered by the production-line rework test above.
+  assert.match(adminAfter, /last cycle: REWORK_MODE · completed · via daily_run/)
   assert.doesNotMatch(adminAfter, /none recorded yet/)
   assert.equal((dataFile("settings.json") as { autopilotEnabled: boolean }).autopilotEnabled, false)
 

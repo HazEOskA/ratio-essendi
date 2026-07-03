@@ -87,3 +87,7 @@ Approved client work converts (by explicit operator click only) into a DeliveryP
 ## FC-022 — Demo Orders Are Explicit and Bounded
 
 The demo path (HVAC TestCo) exists so the operator can rehearse the full loop safely. It runs only on an explicit button click, creates one internal order, refuses to duplicate while an active demo exists, and sends nothing anywhere.
+
+## FC-023 — The Production Line Is a Projection, Not a Second Engine
+
+`deriveProductionLine(state, ctx)` is a pure function that projects the existing store (orders, dailyDigitals, deliveryPacks, workRuns) onto an 8-station floor view. It stores nothing, runs no new agents, and shares deriveOps' mode/next-action so the line and the cockpit never disagree. The factory is synchronous and single-agent per job, so stations a run folds in are shown as `skipped` — never as fake concurrent work. This honesty is the point: the operator sees the real floor, not a theatre.
