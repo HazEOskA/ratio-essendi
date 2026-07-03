@@ -1,0 +1,4 @@
+.factory-data/
+.data/
+*.log
+docs/

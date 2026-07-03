@@ -16,7 +16,7 @@
  *   POST /api/action  { action: string, id: string }    → approve / reject
  *   POST /api/daily   { action, id?, feedback?, date? } → daily mission actions
  */
-import { createServer } from "node:http"
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { join } from "node:path"
 import { mkdirSync, existsSync } from "node:fs"
 import {
@@ -56,7 +56,11 @@ import { randomUUID } from "node:crypto"
 
 // PORT is env-overridable so the HTTP test suite can run on a free port.
 const PORT = Number(process.env["PORT"] ?? 7778)
-const DATA_DIR = join(process.cwd(), ".factory-data")
+// On Vercel (serverless) the project dir is read-only; only /tmp is writable,
+// and it is ephemeral per cold start. That is acceptable for a public PREVIEW:
+// state seeds itself and resets between cold starts. Locally, persist as before.
+const ON_VERCEL = Boolean(process.env["VERCEL"])
+const DATA_DIR = process.env["FACTORY_DATA_DIR"] ?? (ON_VERCEL ? "/tmp/.factory-data" : join(process.cwd(), ".factory-data"))
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
 
 const store = new FactoryStore(DATA_DIR)
@@ -1772,7 +1776,11 @@ function json(res: import("node:http").ServerResponse, data: unknown, status = 2
   res.end(JSON.stringify(data))
 }
 
-const server = createServer(async (req, res) => {
+/**
+ * The whole request router, extracted so a serverless entry (Vercel) can call
+ * it directly with Node's (req, res) — no listener, no background timer.
+ */
+export const requestHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
   const url = req.url ?? "/"
   const method = req.method ?? "GET"
   const state = store.snapshot()
@@ -2150,7 +2158,28 @@ const server = createServer(async (req, res) => {
     console.error(err)
     html(res, `<pre>500: ${E(String(err))}</pre>`, 500)
   }
-})
+}
+
+const server = createServer(requestHandler)
+
+/**
+ * Serverless preview seed: with no background timer, a cold-start store would be
+ * empty. Run exactly one bounded cycle so the cockpit shows real training work.
+ * Idempotent per instance and per day — never spams (FC-012).
+ */
+let seeded = false
+export async function ensureSeeded(): Promise<void> {
+  if (seeded) return
+  seeded = true
+  try {
+    if (store.snapshot().workRuns.length === 0) {
+      const r = await runAutonomousCycle(store, undefined, "startup")
+      lastCycleSummary = `${r.mode}: training=${r.trainingCreated} orders=${r.ordersProduced.length} reworks=${r.reworksRegenerated.length}`
+    }
+  } catch (err) {
+    console.error("[seed] failed:", err)
+  }
+}
 
 // --- Autopilot loop: client orders first, training when idle, always bounded ---
 
@@ -2167,6 +2196,10 @@ async function autopilotTick(trigger: FactoryWorkRunTrigger = "timer"): Promise<
   }
 }
 
+// Serverless (Vercel) has no persistent process: no background timer, no
+// listener. The serverless entry imports `requestHandler` + `ensureSeeded`
+// instead. Everything below only runs as a long-lived local/CI process.
+if (!ON_VERCEL) {
 setInterval(() => void autopilotTick("timer"), 60_000)
 
 server.listen(PORT, () => {
@@ -2191,3 +2224,4 @@ server.listen(PORT, () => {
   console.log("Press Ctrl+C to stop.\n")
   void autopilotTick("startup")
 })
+}
