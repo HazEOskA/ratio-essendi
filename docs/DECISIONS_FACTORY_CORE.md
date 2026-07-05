@@ -91,3 +91,9 @@ The demo path (HVAC TestCo) exists so the operator can rehearse the full loop sa
 ## FC-023 — The Production Line Is a Projection, Not a Second Engine
 
 `deriveProductionLine(state, ctx)` is a pure function that projects the existing store (orders, dailyDigitals, deliveryPacks, workRuns) onto an 8-station floor view. It stores nothing, runs no new agents, and shares deriveOps' mode/next-action so the line and the cockpit never disagree. The factory is synchronous and single-agent per job, so stations a run folds in are shown as `skipped` — never as fake concurrent work. This honesty is the point: the operator sees the real floor, not a theatre.
+
+## FC-024 — Integrity Guard: Pinocchio Measures, HRAR Quarantines, the Operator Resurrects
+
+`@ratio-essendi/integrity-guard` ports the Pinocchio + HRAR design (DriftSensor → PinocchioNose → HarakiriProtocol → RatioEssendiGuard facade) with one deliberate deviation: **no `process.exit` inside the factory server.** Killing the whole cockpit over one drifted agent would be the single point of failure forbidden by decision 011 — so in the factory, HRAR's cleanup quarantines the agent instead. The `exitProcess: true` flag remains in the package for standalone bots where the process IS the agent, default OFF.
+
+The nose feeds on real signals, not simulated market data: operator rejections (+25), rework requests (+12), quality drift below baseline (z-score via DriftSensor, capped +15); acceptance and warehousing heal (−10). At 80 cm the agent is quarantined from CLIENT production only — the Training Yard rule: a drifted agent goes back to training, it does not touch client work. Only an explicit operator reset (God Layer) lifts the quarantine; breach history survives resets. Events stay operational per decision 004: `integrity.harakiri`, `integrity.reset` — the playful names live in class names and docs, not in metaphysical log actors.

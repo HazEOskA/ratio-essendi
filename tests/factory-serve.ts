@@ -36,6 +36,10 @@ import {
   warehouseDeliveryPack,
   renderPackMarkdown,
   deriveProductionLine,
+  getIntegrityRecords,
+  resetAgentIntegrity,
+  INTEGRITY_LIMITS,
+  PRODUCER_AGENTS,
 } from "@ratio-essendi/factory-core"
 import type {
   FactoryState,
@@ -1180,6 +1184,29 @@ function renderAdmin(state: FactoryState, flash?: string): string {
     </div>
   </section>
 
+  <section class="admin-panel" id="integrity-guard">
+    <h2>Integrity Guard — Pinocchio Monitor</h2>
+    <p class="dim" style="font-size:12px;margin-bottom:8px">The nose grows when you reject (+${INTEGRITY_LIMITS.growRejected}) or send back for rework (+${INTEGRITY_LIMITS.growRework}), and shrinks when you accept (−${INTEGRITY_LIMITS.shrinkAccepted}). At ${INTEGRITY_LIMITS.critical}cm the HRAR protocol quarantines the agent from client production — training stays allowed. Only your reset (God Layer) lifts it.</p>
+    <table class="admin-table">
+      <thead><tr><th>Agent</th><th>Nose</th><th>Status</th><th>Breaches</th><th>Last signal</th><th>Action</th></tr></thead>
+      <tbody>
+        ${getIntegrityRecords(store).map((r) => `<tr>
+          <td class="mono">${E(r.agentId)}</td>
+          <td><span class="mono">${r.noseLength}cm</span><span class="score-bar"><span class="score-fill" style="width:${r.noseLength}%;background:${r.noseLength >= INTEGRITY_LIMITS.critical ? "#f85149" : r.noseLength >= INTEGRITY_LIMITS.watch ? "#d29922" : "#3fb950"}"></span></span></td>
+          <td>${badge(r.status, r.status === "quarantined" ? "bad" : r.status === "watch" ? "warn" : "ok")}</td>
+          <td class="mono">${r.breaches}</td>
+          <td class="dim" style="font-size:11.5px">${E(r.lastSignal ?? "—")}</td>
+          <td>${r.noseLength > 0 || r.status !== "healthy" ? `
+            <form method="POST" action="/api/integrity">
+              <input type="hidden" name="action" value="reset">
+              <input type="hidden" name="agentId" value="${E(r.agentId)}">
+              <button type="submit" style="font-size:11.5px">Reset (God Layer)</button>
+            </form>` : '<span class="dim" style="font-size:11.5px">—</span>'}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+  </section>
+
   <section class="admin-panel">
     <h2>Agent Production Line</h2>
     <p class="dim" style="font-size:12px;margin-bottom:8px">Compact view of the production floor. Full drilldown: <a href="/production-line" style="color:#58a6ff">/production-line</a></p>
@@ -1804,6 +1831,7 @@ const server = createServer(async (req, res) => {
           standingStill: ops.standingStill,
           nextOperatorAction: { title: ops.nextActionTitle, detail: ops.nextActionDetail },
           waiting: ops.waiting,
+          integrity: getIntegrityRecords(store),
           businessLoop: {
             servicesInCatalog: SERVICE_CATALOG.length,
             activeOrders: state.orders.filter((o) => o.status === "new" || o.status === "in_production").length,
@@ -2122,6 +2150,22 @@ const server = createServer(async (req, res) => {
       const result = await runAutonomousCycle(store, undefined, "order_created")
       lastCycleSummary = `${result.mode}: orders=${result.ordersProduced.length}`
       return respond(`Demo production run ${order.id} created for ${demo.clientName} (${demo.serviceId}) — internal only, nothing was sent anywhere.`)
+    }
+
+    if (method === "POST" && url === "/api/integrity") {
+      const params = await readBody(req)
+      const agentIdRaw = (params["agentId"] ?? "").trim()
+      if (!(PRODUCER_AGENTS as readonly string[]).includes(agentIdRaw)) {
+        return json(res, { error: "invalid agent", received: agentIdRaw, allowed: PRODUCER_AGENTS }, 400)
+      }
+      if ((params["action"] ?? "") !== "reset") {
+        return json(res, { error: "unknown integrity action" }, 400)
+      }
+      const didReset = resetAgentIntegrity(store, agentIdRaw as MissionAgentId)
+      return html(res, renderAdmin(store.snapshot(),
+        didReset
+          ? `Integrity reset for ${agentIdRaw} — client production re-enabled (God Layer decision).`
+          : `Nothing to reset for ${agentIdRaw} — nose already at 0.`))
     }
 
     if (method === "POST" && url === "/api/autopilot") {

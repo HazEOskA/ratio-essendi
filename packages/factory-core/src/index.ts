@@ -41,6 +41,8 @@ export type {
   AgentProductionTask,
   ProductionLineStation,
   ProductionLineView,
+  AgentIntegrityRecord,
+  AgentIntegrityStatus,
 } from "./types.js"
 
 export { JsonStore, FactoryStore } from "./store.js"
@@ -64,3 +66,12 @@ export { runAutonomousCycle } from "./autopilot.js"
 export { SERVICE_CATALOG, getServiceDefinition, isValidServiceId, buildServiceContent } from "./services.js"
 export { createDeliveryPack, approveDeliveryPack, warehouseDeliveryPack, renderPackMarkdown } from "./packs.js"
 export { deriveProductionLine, PRODUCTION_STATIONS } from "./production-line.js"
+export {
+  getIntegrityRecords,
+  isAgentQuarantined,
+  resetAgentIntegrity,
+  recordOperatorIntegritySignal,
+  recordQualityIntegritySignal,
+  INTEGRITY_LIMITS,
+  PRODUCER_AGENTS,
+} from "./integrity.js"

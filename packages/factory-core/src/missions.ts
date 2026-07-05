@@ -21,6 +21,7 @@ import type {
 } from "./types.js"
 import type { FactoryStore } from "./store.js"
 import { getServiceDefinition, buildServiceContent } from "./services.js"
+import { recordOperatorIntegritySignal, recordQualityIntegritySignal } from "./integrity.js"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1465,6 +1466,7 @@ export async function runDailyMissions(store: FactoryStore, date?: string): Prom
 
     store.addDailyDigital(digital)
     store.addDailyMission(mission)
+    void recordQualityIntegritySignal(store, DEPT_AGENT[dept], score, digitalId)
 
     const event: FactoryEvent = {
       id: randomUUID(),
@@ -1488,6 +1490,7 @@ export function acceptDigital(store: FactoryStore, id: string): void {
   store.updateDailyDigital(id, { status: "accepted", updatedAt: now })
   const d = store.getDailyDigital(id)
   if (!d) return
+  void recordOperatorIntegritySignal(store, d.createdByAgentId, "accepted", d.id)
   store.addFeedbackEvent({
     id: randomUUID(),
     timestamp: now,
@@ -1509,6 +1512,7 @@ export function reworkDigital(store: FactoryStore, id: string, feedback: string)
   store.updateDailyDigital(id, { status: "needs_rework", operatorFeedback: feedback, updatedAt: now })
   const d = store.getDailyDigital(id)
   if (!d) return ""
+  void recordOperatorIntegritySignal(store, d.createdByAgentId, "needs_rework", d.id)
   const revTaskId = `rev-${id}-${Date.now()}`
   store.addFeedbackEvent({
     id: randomUUID(),
@@ -1534,6 +1538,7 @@ export function rejectDigital(store: FactoryStore, id: string, feedback: string)
   store.updateDailyDigital(id, { status: "rejected", location: "trash", operatorFeedback: feedback, updatedAt: now })
   const d = store.getDailyDigital(id)
   if (!d) return
+  void recordOperatorIntegritySignal(store, d.createdByAgentId, "rejected", d.id)
   store.addFeedbackEvent({
     id: randomUUID(),
     timestamp: now,
@@ -1617,6 +1622,7 @@ export function warehouseDigital(store: FactoryStore, id: string): void {
   store.updateDailyDigital(id, { status: "accepted", location: "warehouse", updatedAt: now })
   const d = store.getDailyDigital(id)
   if (!d) return
+  void recordOperatorIntegritySignal(store, d.createdByAgentId, "warehoused", d.id)
   store.addFeedbackEvent({
     id: randomUUID(),
     timestamp: now,

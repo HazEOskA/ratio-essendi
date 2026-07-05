@@ -12,6 +12,7 @@ import type { ClientOrder, DailyDigital, DailyDigitalDepartment, OrderLanguage }
 import type { FactoryStore } from "./store.js"
 import { TASK_TYPES, DEPT_AGENT, generateAssetContent, scoreContent } from "./missions.js"
 import { getServiceDefinition, buildServiceContent } from "./services.js"
+import { recordQualityIntegritySignal } from "./integrity.js"
 
 export type OrderInput = {
   clientName: string
@@ -155,6 +156,7 @@ export function produceOrderDeliverable(store: FactoryStore, orderId: string): D
     location: "daily_review",
   }
   store.addDailyDigital(digital)
+  void recordQualityIntegritySignal(store, DEPT_AGENT[order.department], generated.qualityScore, digital.id)
   store.updateOrder(order.id, { status: "ready_for_review", deliverableId: digital.id, taskType, updatedAt: now })
   store.addEvent({
     id: randomUUID(),

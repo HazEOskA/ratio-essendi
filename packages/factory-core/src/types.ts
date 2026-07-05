@@ -263,6 +263,19 @@ export type CaseRecord = {
   followUpSuggestion: string
 }
 
+// --- Agent integrity (Pinocchio monitor + HRAR protocol) ---
+
+export type AgentIntegrityStatus = "healthy" | "watch" | "quarantined"
+
+export type AgentIntegrityRecord = {
+  agentId: MissionAgentId
+  noseLength: number
+  status: AgentIntegrityStatus
+  breaches: number
+  lastSignal?: string
+  updatedAt: string
+}
+
 // --- Production line (derived view over the current state) ---
 
 export type ProductionStationId =
@@ -383,4 +396,5 @@ export type FactoryState = {
   workRuns: FactoryWorkRun[]
   deliveryPacks: DeliveryPack[]
   caseRecords: CaseRecord[]
+  integrity: AgentIntegrityRecord[]
 }

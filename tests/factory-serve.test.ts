@@ -93,6 +93,7 @@ test("admin cockpit renders required sections and GET does not mutate store", as
     "trash.json",
     "settings.json",
     "work-runs.json",
+    "integrity.json",
   ]
   const before = files.map((name) => [name, rawDataFile(name)])
 
@@ -571,6 +572,57 @@ test("GET /production-line does not mutate the store", async () => {
   assert.equal(res.status, 200)
   const after = files.map((name) => [name, rawDataFile(name)])
   assert.deepEqual(after, before, "GET /production-line must not mutate the store")
+})
+
+test("integrity guard: /admin renders the Pinocchio panel with all 5 producers healthy", async () => {
+  const admin = await (await fetch(`${BASE}/admin`)).text()
+  assert.match(admin, /Integrity Guard — Pinocchio Monitor/)
+  assert.match(admin, /Reset \(God Layer\)|—/)
+  for (const agent of ["MA", "SA", "DA", "RA", "QAA"]) {
+    assert.match(admin, new RegExp(`<td class="mono">${agent}</td>`), `producer ${agent} must be listed`)
+  }
+  // HRAR explanation is visible so the operator understands the rule
+  assert.match(admin, /quarantines the agent from client production/)
+  assert.match(admin, /training stays allowed/i)
+
+  // /api/admin/state exposes the same records, read-only
+  const state = (await (await fetch(`${BASE}/api/admin/state`)).json()) as {
+    integrity: { agentId: string; noseLength: number; status: string }[]
+  }
+  assert.equal(state.integrity.length, 5)
+  // reworks earlier in this suite grew SA's nose (+12 each) — records are real
+  const sa = state.integrity.find((r) => r.agentId === "SA")!
+  assert.ok(sa.noseLength > 0, "SA nose must reflect earlier rework signals")
+})
+
+test("integrity guard: invalid agent id → 400 JSON, no store writes", async () => {
+  const before = rawDataFile("integrity.json")
+  const res = await fetch(`${BASE}/api/integrity`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "reset", agentId: "ZZ" }),
+  })
+  assert.equal(res.status, 400)
+  const body = (await res.json()) as { error: string; allowed: string[] }
+  assert.equal(body.error, "invalid agent")
+  assert.deepEqual(body.allowed, ["MA", "SA", "DA", "RA", "QAA"])
+  assert.equal(rawDataFile("integrity.json"), before, "invalid reset must not write")
+})
+
+test("integrity guard: operator reset clears the nose and logs integrity.reset", async () => {
+  // SA accumulated rework signals earlier in the suite — reset it
+  const res = await fetch(`${BASE}/api/integrity`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "reset", agentId: "SA" }),
+  })
+  assert.equal(res.status, 200)
+  const records = JSON.parse(rawDataFile("integrity.json")) as { agentId: string; noseLength: number; status: string }[]
+  const sa = records.find((r) => r.agentId === "SA")!
+  assert.equal(sa.noseLength, 0)
+  assert.equal(sa.status, "healthy")
+  const events = dataFile("events.json") as { eventType: string; agentId: string }[]
+  assert.ok(events.some((e) => e.eventType === "integrity.reset" && e.agentId === "SA"))
 })
 
 test("paused autopilot remains paused after a real server restart", async () => {

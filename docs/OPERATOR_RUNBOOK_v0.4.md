@@ -137,6 +137,24 @@ line before real clients.
 operator button. Nothing is sent, published, or delivered. `/api/production-line`
 is a read-only JSON mirror of the same view.
 
+## 11b. Integrity Guard (Pinokio + HRAR)
+
+Every producer agent (MA, SA, DA, RA, QAA) carries a persistent "nose" (0–100 cm)
+— a memory of how often its work failed you. Rejections grow it (+25), rework
+requests grow it (+12), quality drops below baseline grow it (up to +15);
+accepting or warehousing shrinks it (−10). At 40 cm the agent enters *watch*;
+at 80 cm the HRAR protocol fires: the agent is **quarantined from client
+production**. It keeps training (safe, internal) but the autopilot skips its
+department for client orders, with a visible "BLOCKED by integrity guard" step.
+
+The `/admin` panel "Integrity Guard — Pinocchio Monitor" shows nose, status,
+breach count, and last signal per agent. **Reset (God Layer)** is the only way
+back — an explicit operator click that zeroes the nose, re-enables production,
+and logs `integrity.reset`. Breach history is preserved across resets.
+
+Nothing here sends anything anywhere; the guard only restricts what the
+factory may produce until you decide otherwise.
+
 ## 12. Definition of done for a client run
 
 1. Order exists with a service and honest brief

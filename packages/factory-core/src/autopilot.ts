@@ -27,6 +27,7 @@ import type { FactoryStore } from "./store.js"
 import { produceOrderDeliverable } from "./orders.js"
 import { DEPT_AGENT, runDailyMissions, regenerateDigital } from "./missions.js"
 import { getAgent } from "./registry.js"
+import { isAgentQuarantined } from "./integrity.js"
 
 type StepInput = {
   agentId: AgentId
@@ -126,10 +127,24 @@ export async function runAutonomousCycle(
   try {
     // 1. Client work first — real orders always beat training. If an order's
     // existing deliverable is marked needs_rework, the rework stage handles it.
-    const openOrders = store.getOpenOrders().filter((order) => {
+    const runnable = store.getOpenOrders().filter((order) => {
       const existing = order.deliverableId ? store.getDailyDigital(order.deliverableId) : undefined
       return existing?.status !== "needs_rework"
     })
+    // HRAR quarantine: a quarantined producer may keep training, but is cut
+    // off from client production until the operator resets it (God Layer).
+    const integrityBlocked = runnable.filter((order) => isAgentQuarantined(store, DEPT_AGENT[order.department]))
+    const openOrders = runnable.filter((order) => !isAgentQuarantined(store, DEPT_AGENT[order.department]))
+    for (const order of integrityBlocked) {
+      steps.push(completedStep({
+        agentId: DEPT_AGENT[order.department],
+        department: order.department,
+        jobType: "client_order_production",
+        status: "skipped",
+        inputSummary: `${order.id} for ${order.clientName}: ${short(order.description)}`,
+        outputSummary: `BLOCKED by integrity guard: ${DEPT_AGENT[order.department]} is quarantined (HRAR). Training allowed; client production halted until operator reset.`,
+      }))
+    }
     ordersProduced = []
     for (const order of openOrders) {
       const stepStartedAt = new Date().toISOString()

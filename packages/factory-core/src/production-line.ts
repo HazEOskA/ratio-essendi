@@ -286,12 +286,17 @@ export function deriveProductionLine(
     const foldedSkip =
       tasks.length === 0 && producerIds.includes(def.id) && allTasks.some((t) => t.source === "client" || t.source === "training")
     const lastTask = tasks[tasks.length - 1]
+    // HRAR override: a quarantined producer's station reads "blocked" no matter
+    // what sits on it — the integrity guard has cut it off from client work.
+    const quarantined = state.integrity.some(
+      (r) => r.status === "quarantined" && r.agentId === def.agentId,
+    )
     return {
       id: def.id,
       name: def.name,
       agentId: def.agentId,
       purpose: def.purpose,
-      status: foldedSkip ? "skipped" : status,
+      status: quarantined ? "blocked" : foldedSkip ? "skipped" : status,
       ...(lastTask ? { lastTask } : {}),
       taskCount: tasks.length,
     }
