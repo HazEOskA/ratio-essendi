@@ -609,20 +609,92 @@ test("integrity guard: invalid agent id → 400 JSON, no store writes", async ()
   assert.equal(rawDataFile("integrity.json"), before, "invalid reset must not write")
 })
 
-test("integrity guard: operator reset clears the nose and logs integrity.reset", async () => {
-  // SA accumulated rework signals earlier in the suite — reset it
+test("integrity guard reset audit: missing agentId → 400, zero writes", async () => {
+  const before = rawDataFile("integrity.json")
+  const eventsBefore = (dataFile("events.json") as unknown[]).length
+  const res = await fetch(`${BASE}/api/integrity`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "reset", reason: "operator_override" }),
+  })
+  assert.equal(res.status, 400)
+  const body = (await res.json()) as { error: string }
+  assert.equal(body.error, "missing agentId")
+  assert.equal(rawDataFile("integrity.json"), before, "no integrity write on missing agentId")
+  assert.equal((dataFile("events.json") as unknown[]).length, eventsBefore, "no event on missing agentId")
+})
+
+test("integrity guard reset audit: unknown agent → 400, zero writes", async () => {
+  const before = rawDataFile("integrity.json")
+  const res = await fetch(`${BASE}/api/integrity`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "reset", agentId: "ZZ", reason: "operator_override" }),
+  })
+  assert.equal(res.status, 400)
+  const body = (await res.json()) as { error: string; allowed: string[] }
+  assert.equal(body.error, "invalid agent")
+  assert.deepEqual(body.allowed, ["MA", "SA", "DA", "RA", "QAA"])
+  assert.equal(rawDataFile("integrity.json"), before, "no integrity write on unknown agent")
+})
+
+test("integrity guard reset audit: missing reason → 400, zero writes", async () => {
+  const before = rawDataFile("integrity.json")
   const res = await fetch(`${BASE}/api/integrity`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ action: "reset", agentId: "SA" }),
   })
+  assert.equal(res.status, 400)
+  const body = (await res.json()) as { error: string; allowed: string[] }
+  assert.equal(body.error, "missing reason")
+  assert.deepEqual(body.allowed, ["false_positive", "retrained", "accepted_risk", "operator_override", "other"])
+  assert.equal(rawDataFile("integrity.json"), before, "no integrity write on missing reason")
+})
+
+test("integrity guard reset audit: invalid reason → 400, zero writes", async () => {
+  const before = rawDataFile("integrity.json")
+  const res = await fetch(`${BASE}/api/integrity`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "reset", agentId: "SA", reason: "because_i_said_so" }),
+  })
+  assert.equal(res.status, 400)
+  const body = (await res.json()) as { error: string }
+  assert.equal(body.error, "invalid reason")
+  assert.equal(rawDataFile("integrity.json"), before, "no integrity write on invalid reason")
+})
+
+test("integrity guard: valid reset (with reason) clears nose, preserves breaches, logs full audit trail", async () => {
+  // SA accumulated rework signals earlier in the suite (breaches may be 0 or more)
+  const before = (dataFile("integrity.json") as { agentId: string; breaches: number }[]).find((r) => r.agentId === "SA")!
+  const res = await fetch(`${BASE}/api/integrity`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "reset", agentId: "SA", reason: "retrained", note: "swapped weak template" }),
+  })
   assert.equal(res.status, 200)
-  const records = JSON.parse(rawDataFile("integrity.json")) as { agentId: string; noseLength: number; status: string }[]
+  const records = JSON.parse(rawDataFile("integrity.json")) as { agentId: string; noseLength: number; status: string; breaches: number }[]
   const sa = records.find((r) => r.agentId === "SA")!
   assert.equal(sa.noseLength, 0)
   assert.equal(sa.status, "healthy")
-  const events = dataFile("events.json") as { eventType: string; agentId: string }[]
-  assert.ok(events.some((e) => e.eventType === "integrity.reset" && e.agentId === "SA"))
+  assert.equal(sa.breaches, before.breaches, "breach history must be preserved across a reset")
+
+  const events = dataFile("events.json") as { eventType: string; agentId: string; detail: string }[]
+  const resetEvent = events.find((e) => e.eventType === "integrity.reset" && e.agentId === "SA")
+  assert.ok(resetEvent, "integrity.reset event must be logged")
+  assert.ok(resetEvent!.detail.includes("Reason: retrained"))
+  assert.ok(resetEvent!.detail.includes("Note: swapped weak template"))
+  assert.ok(resetEvent!.detail.includes("Breach history preserved"))
+  assert.ok(resetEvent!.detail.includes("God Layer"))
+})
+
+test("GET endpoints never mutate integrity.json", async () => {
+  const before = rawDataFile("integrity.json")
+  await fetch(`${BASE}/admin`)
+  await fetch(`${BASE}/api/admin/state`)
+  await fetch(`${BASE}/production-line`)
+  assert.equal(rawDataFile("integrity.json"), before, "GET requests must never write integrity.json")
 })
 
 test("paused autopilot remains paused after a real server restart", async () => {

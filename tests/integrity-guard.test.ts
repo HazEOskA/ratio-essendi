@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import {
   DriftSensor,
   PinocchioNose,
-  HarakiriProtocol,
+  HRARProtocol,
   RatioEssendiGuard,
   mean,
   stdDev,
@@ -60,11 +60,11 @@ test("PinocchioNose: cumulative mode — grow/shrink with clamping", () => {
   assert.equal(nose.isBreached(), false)
 })
 
-// ─── HarakiriProtocol ─────────────────────────────────────────────────────────
+// ─── HRARProtocol ─────────────────────────────────────────────────────────────
 
-test("HarakiriProtocol: runs cleanup, reports, and does NOT exit by default", async () => {
+test("HRARProtocol: runs cleanup, reports, and does NOT exit by default", async () => {
   let cleaned = false
-  const protocol = new HarakiriProtocol({ cleanup: () => { cleaned = true } })
+  const protocol = new HRARProtocol({ cleanup: () => { cleaned = true } })
   const report = await protocol.execute(85)
   // The fact this line runs at all proves no process.exit happened.
   assert.equal(cleaned, true)
@@ -73,8 +73,8 @@ test("HarakiriProtocol: runs cleanup, reports, and does NOT exit by default", as
   assert.equal(report.processExitRequested, false)
 })
 
-test("HarakiriProtocol: cleanup failure is captured, not thrown", async () => {
-  const protocol = new HarakiriProtocol({
+test("HRARProtocol: cleanup failure is captured, not thrown", async () => {
+  const protocol = new HRARProtocol({
     cleanup: () => { throw new Error("cleanup boom") },
   })
   const report = await protocol.execute(90)
@@ -97,7 +97,7 @@ test("RatioEssendiGuard: stable data → action runs with its arguments", async 
   assert.ok(verdict.noseLength < 75)
 })
 
-test("RatioEssendiGuard: drifted data → action blocked, harakiri executed with cleanup", async () => {
+test("RatioEssendiGuard: drifted data → action blocked, HRAR executed with cleanup", async () => {
   let positionsClosed = false
   const guard = new RatioEssendiGuard({
     baselineData: [100, 102, 99, 101, 100],
@@ -110,8 +110,8 @@ test("RatioEssendiGuard: drifted data → action blocked, harakiri executed with
   assert.equal(actionRan, false, "the agent action must never run after a breach")
   assert.equal(positionsClosed, true, "emergency cleanup must run")
   assert.equal(verdict.noseLength, 100)
-  assert.ok(verdict.harakiri)
-  assert.equal(verdict.harakiri!.cleanupRan, true)
+  assert.ok(verdict.hrar)
+  assert.equal(verdict.hrar!.cleanupRan, true)
 })
 
 test("RatioEssendiGuard: supports async actions", async () => {

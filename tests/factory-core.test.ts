@@ -843,10 +843,10 @@ test("integrity: operator rejections grow the nose; 4 rejections quarantine the 
     assert.equal(rec.breaches, 1)
     assert.ok(isAgentQuarantined(store, "DA"))
     // HRAR event is in the log, operational wording, no metaphysics
-    const ev = store.snapshot().events.find((e) => e.eventType === "integrity.harakiri")
-    assert.ok(ev, "integrity.harakiri event must be logged")
+    const ev = store.snapshot().events.find((e) => e.eventType === "integrity.quarantine")
+    assert.ok(ev, "integrity.quarantine event must be logged")
     assert.ok(ev!.detail.includes("quarantined from client production"))
-    assert.ok(ev!.detail.includes("Operator reset required"))
+    assert.ok(ev!.detail.includes("Operator reset (with reason) required"))
   } finally {
     cleanup()
   }
@@ -900,17 +900,31 @@ test("integrity: operator reset (God Layer) re-enables client production", async
     await runAutonomousCycle(store, "2026-07-05")
     assert.equal(store.getOrder(order.id)!.deliverableId, undefined, "blocked while quarantined")
 
-    const didReset = resetAgentIntegrity(store, "DA")
-    assert.equal(didReset, true)
-    const rec = store.getIntegrityRecord("DA")!
-    assert.equal(rec.status, "healthy")
-    assert.equal(rec.noseLength, 0)
-    assert.equal(rec.breaches, 1, "breach history is preserved across resets")
-    assert.ok(store.snapshot().events.some((e) => e.eventType === "integrity.reset"))
+    const updated = resetAgentIntegrity(store, "DA", "retrained", "swapped the weak template")
+    assert.ok(updated)
+    assert.equal(updated!.status, "healthy")
+    assert.equal(updated!.noseLength, 0)
+    assert.equal(updated!.breaches, 1, "breach history is preserved across resets")
+    const resetEvent = store.snapshot().events.find((e) => e.eventType === "integrity.reset")
+    assert.ok(resetEvent)
+    assert.ok(resetEvent!.detail.includes("Reason: retrained"))
+    assert.ok(resetEvent!.detail.includes("Note: swapped the weak template"))
+    assert.ok(resetEvent!.detail.includes("Breach history preserved (1 total)"))
+    assert.ok(resetEvent!.detail.includes("God Layer"))
 
     const result = await runAutonomousCycle(store, "2026-07-05")
     assert.equal(result.ordersProduced.length, 1, "production must resume after reset")
     assert.ok(store.getOrder(order.id)!.deliverableId)
+  } finally {
+    cleanup()
+  }
+})
+
+test("integrity: resetAgentIntegrity is a no-op (undefined) on an already-healthy agent", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const result = resetAgentIntegrity(store, "MA", "operator_override")
+    assert.equal(result, undefined, "nothing to reset when nose is already 0 / healthy")
   } finally {
     cleanup()
   }

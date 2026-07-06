@@ -1,6 +1,7 @@
 /**
- * HarakiriProtocol — the Executor. When it receives the signal, it runs the
- * cleanup callback and reports what happened.
+ * HRARProtocol — the Executor of the HRAR (Hard Reset / Agent Restriction)
+ * protocol. When it receives the signal, it runs the cleanup callback and
+ * reports what happened.
  *
  * IMPORTANT ADAPTATION vs the original spec: `process.exit(1)` is OPT-IN
  * (`exitProcess: true`), default OFF. Inside the factory server a hard exit
@@ -11,7 +12,7 @@
  * process IS the agent.
  */
 
-export type HarakiriReport = {
+export type HRARReport = {
   executedAt: string
   finalNoseLength: number
   cleanupRan: boolean
@@ -19,7 +20,7 @@ export type HarakiriReport = {
   processExitRequested: boolean
 }
 
-export class HarakiriProtocol {
+export class HRARProtocol {
   readonly #cleanup?: () => void | Promise<void>
   readonly #exitProcess: boolean
 
@@ -28,8 +29,8 @@ export class HarakiriProtocol {
     this.#exitProcess = opts.exitProcess ?? false
   }
 
-  async execute(finalNoseLength: number): Promise<HarakiriReport> {
-    const report: HarakiriReport = {
+  async execute(finalNoseLength: number): Promise<HRARReport> {
+    const report: HRARReport = {
       executedAt: new Date().toISOString(),
       finalNoseLength,
       cleanupRan: false,

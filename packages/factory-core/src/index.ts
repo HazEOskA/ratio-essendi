@@ -72,6 +72,9 @@ export {
   resetAgentIntegrity,
   recordOperatorIntegritySignal,
   recordQualityIntegritySignal,
+  isValidResetReason,
   INTEGRITY_LIMITS,
+  INTEGRITY_RESET_REASONS,
   PRODUCER_AGENTS,
 } from "./integrity.js"
+export type { IntegrityResetReason } from "./integrity.js"

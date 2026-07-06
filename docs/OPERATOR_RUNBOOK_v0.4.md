@@ -137,23 +137,52 @@ line before real clients.
 operator button. Nothing is sent, published, or delivered. `/api/production-line`
 is a read-only JSON mirror of the same view.
 
-## 11b. Integrity Guard (Pinokio + HRAR)
+## 11b. Integrity Guard (Pinocchio + HRAR)
 
 Every producer agent (MA, SA, DA, RA, QAA) carries a persistent "nose" (0–100 cm)
 — a memory of how often its work failed you. Rejections grow it (+25), rework
 requests grow it (+12), quality drops below baseline grow it (up to +15);
 accepting or warehousing shrinks it (−10). At 40 cm the agent enters *watch*;
-at 80 cm the HRAR protocol fires: the agent is **quarantined from client
-production**. It keeps training (safe, internal) but the autopilot skips its
-department for client orders, with a visible "BLOCKED by integrity guard" step.
+at 80 cm the **HRAR protocol** (Hard Reset / Agent Restriction) fires: the
+agent is **quarantined from client production**. It keeps training (safe,
+internal) but the autopilot skips its department for client orders, with a
+visible "BLOCKED by integrity guard" step.
 
-The `/admin` panel "Integrity Guard — Pinocchio Monitor" shows nose, status,
-breach count, and last signal per agent. **Reset (God Layer)** is the only way
-back — an explicit operator click that zeroes the nose, re-enables production,
-and logs `integrity.reset`. Breach history is preserved across resets.
+**How to recognise an HRAR trigger:** an `integrity.quarantine` event appears
+in the event log, and the agent's row in the Integrity Guard panel turns to
+status `quarantined`. On the Production Line, that agent's station reads
+`blocked` regardless of what task sits on it.
+
+**How to check nose / status / breaches:** open `/admin` → "Integrity Guard —
+Pinocchio Monitor". Each row shows the agent, nose length (with a colour bar),
+status (`healthy` / `watch` / `quarantined`), lifetime breach count, and the
+last signal that moved the nose. The same data is available read-only at
+`GET /api/admin/state` under `integrity`.
+
+**How to reset (God Layer, audited):** a reset is no longer a bare click — you
+must say why. Pick a reason from the dropdown next to the quarantined agent:
+`false_positive`, `retrained`, `accepted_risk`, `operator_override`, or
+`other`; a free-text note is optional but recommended. Submitting without a
+reason, with an unrecognised reason, or for an unknown/missing agent id
+returns a `400` and **writes nothing** — there is no accidental or silent
+reset path, only `POST /api/integrity` with a complete, valid body.
+
+**How to confirm production came back:** after a valid reset, the agent's
+status returns to `healthy` and its nose reads `0cm`. Run a cycle (or wait for
+autopilot) — any client order previously blocked for that department produces
+its deliverable on the next cycle, and the Production Line station for that
+agent stops reading `blocked`.
+
+**How to confirm breach history survived:** the reset does **not** touch the
+`breaches` counter — check the same panel row: the count from before the
+reset is still there. The logged `integrity.reset` event also states it
+explicitly: `"Breach history preserved (N total)"`, alongside the reason,
+optional note, the nose value before the reset, and `"Reset by: operator
+(God Layer)"` — a full audit trail in one line.
 
 Nothing here sends anything anywhere; the guard only restricts what the
-factory may produce until you decide otherwise.
+factory may produce until you decide otherwise, and every decision — quarantine
+or reset — is a reason-bearing event in the log.
 
 ## 12. Definition of done for a client run
 

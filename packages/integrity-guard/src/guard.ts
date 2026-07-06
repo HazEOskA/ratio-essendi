@@ -1,5 +1,5 @@
 /**
- * RatioEssendiGuard — the Facade. Wires Sensor → Nose → Harakiri into one
+ * RatioEssendiGuard — the Facade. Wires Sensor → Nose → HRAR into one
  * interface you can wrap around any agent action.
  *
  * Unlike the Python spec (which returns None and dies), the TS guard returns a
@@ -8,20 +8,20 @@
  */
 import { DriftSensor } from "./drift-sensor.js"
 import { PinocchioNose } from "./pinocchio-nose.js"
-import { HarakiriProtocol, type HarakiriReport } from "./harakiri-protocol.js"
+import { HRARProtocol, type HRARReport } from "./hrar-protocol.js"
 
 export type GuardVerdict<T> = {
   allowed: boolean
   driftScore: number
   noseLength: number
   result?: T
-  harakiri?: HarakiriReport
+  hrar?: HRARReport
 }
 
 export class RatioEssendiGuard {
   readonly sensor: DriftSensor
   readonly nose: PinocchioNose
-  readonly harakiri: HarakiriProtocol
+  readonly hrar: HRARProtocol
 
   constructor(opts: {
     baselineData: readonly number[]
@@ -31,7 +31,7 @@ export class RatioEssendiGuard {
   }) {
     this.sensor = new DriftSensor(opts.baselineData)
     this.nose = new PinocchioNose({ criticalLimit: opts.criticalNoseLimit ?? 80 })
-    this.harakiri = new HarakiriProtocol({
+    this.hrar = new HRARProtocol({
       ...(opts.cleanup ? { cleanup: opts.cleanup } : {}),
       exitProcess: opts.exitProcess ?? false,
     })
@@ -47,8 +47,8 @@ export class RatioEssendiGuard {
     const breached = this.nose.setFromDrift(driftScore)
 
     if (breached) {
-      const harakiri = await this.harakiri.execute(this.nose.noseLength)
-      return { allowed: false, driftScore, noseLength: this.nose.noseLength, harakiri }
+      const hrar = await this.hrar.execute(this.nose.noseLength)
+      return { allowed: false, driftScore, noseLength: this.nose.noseLength, hrar }
     }
     const result = await action(...args)
     return { allowed: true, driftScore, noseLength: this.nose.noseLength, result }

@@ -38,7 +38,9 @@ import {
   deriveProductionLine,
   getIntegrityRecords,
   resetAgentIntegrity,
+  isValidResetReason,
   INTEGRITY_LIMITS,
+  INTEGRITY_RESET_REASONS,
   PRODUCER_AGENTS,
 } from "@ratio-essendi/factory-core"
 import type {
@@ -1197,9 +1199,14 @@ function renderAdmin(state: FactoryState, flash?: string): string {
           <td class="mono">${r.breaches}</td>
           <td class="dim" style="font-size:11.5px">${E(r.lastSignal ?? "—")}</td>
           <td>${r.noseLength > 0 || r.status !== "healthy" ? `
-            <form method="POST" action="/api/integrity">
+            <form method="POST" action="/api/integrity" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
               <input type="hidden" name="action" value="reset">
               <input type="hidden" name="agentId" value="${E(r.agentId)}">
+              <select name="reason" required style="font-size:11px">
+                <option value="">reason...</option>
+                ${INTEGRITY_RESET_REASONS.map((rr) => `<option value="${E(rr)}">${E(rr)}</option>`).join("")}
+              </select>
+              <input name="note" placeholder="note (optional)" style="font-size:11px;width:110px">
               <button type="submit" style="font-size:11.5px">Reset (God Layer)</button>
             </form>` : '<span class="dim" style="font-size:11.5px">—</span>'}</td>
         </tr>`).join("")}
@@ -2155,16 +2162,29 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && url === "/api/integrity") {
       const params = await readBody(req)
       const agentIdRaw = (params["agentId"] ?? "").trim()
+      // Every validation failure below returns 400 with ZERO store writes —
+      // an audited reset cannot happen by accident or with missing evidence.
+      if (!agentIdRaw) {
+        return json(res, { error: "missing agentId" }, 400)
+      }
       if (!(PRODUCER_AGENTS as readonly string[]).includes(agentIdRaw)) {
         return json(res, { error: "invalid agent", received: agentIdRaw, allowed: PRODUCER_AGENTS }, 400)
       }
       if ((params["action"] ?? "") !== "reset") {
         return json(res, { error: "unknown integrity action" }, 400)
       }
-      const didReset = resetAgentIntegrity(store, agentIdRaw as MissionAgentId)
+      const reasonRaw = (params["reason"] ?? "").trim()
+      if (!reasonRaw) {
+        return json(res, { error: "missing reason", allowed: INTEGRITY_RESET_REASONS }, 400)
+      }
+      if (!isValidResetReason(reasonRaw)) {
+        return json(res, { error: "invalid reason", received: reasonRaw, allowed: INTEGRITY_RESET_REASONS }, 400)
+      }
+      const note = (params["note"] ?? "").trim()
+      const updated = resetAgentIntegrity(store, agentIdRaw as MissionAgentId, reasonRaw, note || undefined)
       return html(res, renderAdmin(store.snapshot(),
-        didReset
-          ? `Integrity reset for ${agentIdRaw} — client production re-enabled (God Layer decision).`
+        updated
+          ? `Integrity reset for ${agentIdRaw} (${reasonRaw}) — client production re-enabled (God Layer decision).`
           : `Nothing to reset for ${agentIdRaw} — nose already at 0.`))
     }
 

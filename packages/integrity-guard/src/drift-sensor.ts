@@ -1,7 +1,7 @@
 /**
  * DriftSensor — the Analyst. Measures deviation of incoming data against a
  * baseline as a Z-score. It does not care what happens next (separation of
- * concerns: PinocchioNose judges, HarakiriProtocol executes).
+ * concerns: PinocchioNose judges, HRARProtocol executes).
  */
 
 export function mean(values: readonly number[]): number {
