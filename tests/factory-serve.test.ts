@@ -100,38 +100,38 @@ test("admin cockpit renders required sections and GET does not mutate store", as
   const res = await fetch(`${BASE}/admin`)
   assert.equal(res.status, 200)
   const page = await res.text()
-  assert.match(page, /Boss\/Admin Cockpit/)
-  assert.match(page, /autopilot ON/)
-  assert.match(page, /Next Operator Action/)
-  assert.match(page, /Orders Summary/)
-  assert.match(page, /Training Count/)
-  assert.match(page, /Warehouse Summary/)
-  assert.match(page, /Event Stream/)
-  assert.match(page, /Client Orders Control/)
-  assert.match(page, /Daily Training Review/)
-  assert.match(page, /Factory Workroom/)
-  assert.match(page, /Recent Work Runs/)
-  assert.match(page, /Why It Is Standing Still/)
+  assert.match(page, /Kokpit Szefa\/Administratora/)
+  assert.match(page, /autopilot WŁ\./)
+  assert.match(page, /Następna Akcja Operatora/)
+  assert.match(page, /Podsumowanie Zleceń/)
+  assert.match(page, /Licznik treningu/)
+  assert.match(page, /Podsumowanie Magazynu/)
+  assert.match(page, /Strumień Zdarzeń/)
+  assert.match(page, /Kontrola Zleceń Klientów/)
+  assert.match(page, /Przegląd Treningu Dziennego/)
+  assert.match(page, /Warsztat Fabryki/)
+  assert.match(page, /Ostatnie Przebiegi Pracy/)
+  assert.match(page, /Dlaczego Stoi w Miejscu/)
   // Specific waiting reason with real counts, not a vague placeholder:
   // startup autopilot created 5 training drafts, no client orders yet.
-  assert.match(page, /Factory is waiting for operator review: 0 client outputs and 5 training drafts are pending\./)
+  assert.match(page, /Fabryka czeka na przegląd operatora: zlecenia klienta — 0, szkice treningowe — 5\./)
   // Agent work cards show honest derived state and real fields
-  assert.match(page, /N · Factory Director/)
-  assert.match(page, /Last input:/)
-  assert.match(page, /Last job:/)
-  assert.match(page, /waiting_review/)
+  assert.match(page, /N · Dyrektor Fabryki/)
+  assert.match(page, /Ostatnie wejście:/)
+  assert.match(page, /Ostatnie zadanie:/)
+  assert.match(page, /czeka na przegląd/)
   // Boss status header: safe-mode indicator + persisted last cycle info
-  assert.match(page, /SAFE MODE — no external send/)
-  assert.match(page, /local single-instance/)
-  assert.match(page, /last cycle: NO_CLIENT_TRAINING_MODE · completed · via startup/)
-  assert.doesNotMatch(page, /none recorded yet/)
+  assert.match(page, /TRYB BEZPIECZNY — brak wysyłki na zewnątrz/)
+  assert.match(page, /lokalna pojedyncza instancja/)
+  assert.match(page, /ostatni cykl: TRYB TRENINGOWY · zakończone · via startup/)
+  assert.doesNotMatch(page, /jeszcze nic nie zarejestrowano/)
   // Operator queue is an actionable table, not a bare list
-  assert.match(page, /Next safe action/)
+  assert.match(page, /Bezpieczna następna akcja/)
   assert.match(page, /href="#out-dd-/)
 
   const alias = await fetch(`${BASE}/operator`)
   assert.equal(alias.status, 200)
-  assert.match(await alias.text(), /Boss\/Admin Cockpit/)
+  assert.match(await alias.text(), /Kokpit Szefa\/Administratora/)
 
   const after = files.map((name) => [name, rawDataFile(name)])
   assert.deepEqual(after, before, "GET /admin and /operator must not mutate the store")
@@ -154,18 +154,18 @@ test("valid department is still accepted (whitelist does not over-block)", async
 
   const admin = await (await fetch(`${BASE}/admin`)).text()
   assert.match(admin, /GoodCo/)
-  assert.match(admin, /ready_for_review/)
+  assert.match(admin, /gotowe do przeglądu/)
   assert.match(admin, /deliverable/)
-  assert.match(admin, /Client Orders Control - ready_for_review/)
-  assert.match(admin, /Daily Training Review/)
-  assert.match(admin, /Factory Workroom/)
-  assert.match(admin, /SA · Sales Producer/)
+  assert.match(admin, /Kontrola Zleceń Klientów - gotowe do przeglądu/)
+  assert.match(admin, /Przegląd Treningu Dziennego/)
+  assert.match(admin, /Warsztat Fabryki/)
+  assert.match(admin, /SA · Producent Sprzedaży/)
   assert.match(admin, /client_order_production/)
   assert.match(admin, /dd-order-/)
   // The SA card must tie the output back to the order and prompt review
-  assert.match(admin, /Related order:/)
-  assert.match(admin, /Output id:/)
-  assert.match(admin, /Review client order/)
+  assert.match(admin, /Powiązane zlecenie:/)
+  assert.match(admin, /ID wyjścia:/)
+  assert.match(admin, /Przejrzyj zlecenie klienta/)
   // Output id links to the output card anchor; queue row carries the producer
   assert.match(admin, /href="#out-dd-order-/)
   assert.match(admin, /id="out-dd-order-/)
@@ -176,13 +176,13 @@ test("training visibility: 5/5 quota, every producer agent attributed, separated
   assert.match(admin, /5\/5/)
   // every training card names its producing agent
   for (const agent of ["MA", "SA", "DA", "RA", "QAA"]) {
-    assert.match(admin, new RegExp(`by ${agent}`), `training output attributed to ${agent} must be visible`)
+    assert.match(admin, new RegExp(`od ${agent}`), `training output attributed to ${agent} must be visible`)
   }
   // client outputs and training outputs live in visibly separate sections
-  assert.match(admin, /Client Orders Control - ready_for_review/)
-  assert.match(admin, /Daily Training Review/)
-  const trainingSection = admin.slice(admin.indexOf("Daily Training Review"))
-  assert.doesNotMatch(trainingSection.slice(0, trainingSection.indexOf("Factory Workroom")), /GoodCo/,
+  assert.match(admin, /Kontrola Zleceń Klientów - gotowe do przeglądu/)
+  assert.match(admin, /Przegląd Treningu Dziennego/)
+  const trainingSection = admin.slice(admin.indexOf("Przegląd Treningu Dziennego"))
+  assert.doesNotMatch(trainingSection.slice(0, trainingSection.indexOf("Warsztat Fabryki")), /GoodCo/,
     "client order content must not appear inside the training review section")
 })
 
@@ -202,7 +202,7 @@ test("rework flow: feedback, regeneration, revision count, and rework work run a
 
   // Standing-still reason must now explain the rework wait
   const waiting = await (await fetch(`${BASE}/admin`)).text()
-  assert.match(waiting, /waiting for the rework cycle to regenerate 1 flagged output/)
+  assert.match(waiting, /czeka na cykl poprawek, by odtworzyć oznaczone wyniki: 1/)
 
   // Run the cycle — regenerates the flagged deliverable
   const run = await fetch(`${BASE}/api/daily`, {
@@ -216,7 +216,7 @@ test("rework flow: feedback, regeneration, revision count, and rework work run a
   assert.match(admin, /Make it more concrete\. Add 3 objections and short answers\./)
   assert.match(admin, /rev 1/)
   assert.match(admin, /client_order_rework/)
-  assert.match(admin, /REWORK_MODE/)
+  assert.match(admin, /TRYB POPRAWEK/)
 
   const digitals = dataFile("daily-digitals.json") as { id: string; revisionCount: number; status: string }[]
   const regenerated = digitals.find((d) => d.id === goodCo.deliverableId)!
@@ -244,7 +244,7 @@ test("GET /api/admin/state is read-only and returns useful cockpit state", async
   }
   assert.equal(body.autopilotEnabled, true)
   assert.ok(body.standingStill.length > 10, "standingStill must be a real explanation")
-  assert.equal(body.nextOperatorAction.title, "Review client order")
+  assert.equal(body.nextOperatorAction.title, "Przejrzyj zlecenie klienta")
   assert.ok(body.waiting.ordersReadyForReview >= 1)
   assert.equal(body.counts.trainingToday, "5/5")
   assert.ok(body.orders.length >= 1)
@@ -283,7 +283,7 @@ test("GET /api/work-runs is read-only and returns recent runs with full steps", 
 
 test("service catalog visible on /factory-run and in /api/admin/state business loop", async () => {
   const page = await (await fetch(`${BASE}/factory-run`)).text()
-  assert.match(page, /Service Catalog \(6\)/)
+  assert.match(page, /Katalog Usług \(6\)/)
   for (const name of [
     "AI Workflow Audit \\+ Mini Demo",
     "Website / Landing Page Audit",
@@ -294,8 +294,8 @@ test("service catalog visible on /factory-run and in /api/admin/state business l
   ]) {
     assert.match(page, new RegExp(name), `service must be listed: ${name}`)
   }
-  assert.match(page, /Why It Is Standing Still/)
-  assert.match(page, /SAFE MODE — no external send/)
+  assert.match(page, /Dlaczego Stoi w Miejscu/)
+  assert.match(page, /TRYB BEZPIECZNY — brak wysyłki na zewnątrz/)
 
   const state = (await (await fetch(`${BASE}/api/admin/state`)).json()) as {
     businessLoop: { servicesInCatalog: number; deliveryPacks: { draft: number }; caseRecords: number; trainingToday: string }
@@ -404,7 +404,7 @@ test("delivery pack flow: approve output → pack draft → approve → warehous
   assert.match(deliveryPage, /HVAC TestCo/)
   assert.match(deliveryPage, /## Recommendations/)
   assert.match(deliveryPage, /## Next Steps/)
-  assert.match(deliveryPage, /Approve Pack/)
+  assert.match(deliveryPage, /Zatwierdź Pakiet/)
 
   // Approve the pack
   const approve = await fetch(`${BASE}/api/delivery`, {
@@ -434,8 +434,8 @@ test("delivery pack flow: approve output → pack draft → approve → warehous
 
   // Warehouse page shows the client-ready artifact
   const warehouse = await (await fetch(`${BASE}/warehouse`)).text()
-  assert.match(warehouse, /Delivery Packs \(1\)/)
-  assert.match(warehouse, /warehouse_ready/)
+  assert.match(warehouse, /Pakiety Dostawy \(1\)/)
+  assert.match(warehouse, /gotowe do magazynu/)
 
   // /api/delivery-packs is read-only and reflects the loop
   const files = ["orders.json", "delivery-packs.json", "case-records.json", "events.json", "work-runs.json"]
@@ -449,25 +449,25 @@ test("delivery pack flow: approve output → pack draft → approve → warehous
 
 test("production line: /production-line shows all 8 stations and all 6 agents", async () => {
   const page = await (await fetch(`${BASE}/production-line`)).text()
-  assert.match(page, /Agent Production Line/)
-  for (const station of ["Intake", "Research", "Strategy", "Content", "Delivery", "QA", "Packaging", "Operator Review"]) {
+  assert.match(page, /Linia Produkcyjna Agentów/)
+  for (const station of ["Przyjęcie", "Badania", "Strategia", "Treść", "Realizacja", "QA", "Pakowanie", "Przegląd Operatora"]) {
     assert.match(page, new RegExp(station), `station must be visible: ${station}`)
   }
   for (const agent of ["N ·", "RA ·", "SA ·", "MA ·", "DA ·", "QAA ·"]) {
     assert.match(page, new RegExp(agent.replace("·", "·")), `agent must be visible: ${agent}`)
   }
-  assert.match(page, /SAFE MODE — no external send/)
-  assert.match(page, /honest synchronous view/)
-  assert.match(page, /Station Board/)
+  assert.match(page, /TRYB BEZPIECZNY — brak wysyłki na zewnątrz/)
+  assert.match(page, /uczciwy widok synchroniczny/)
+  assert.match(page, /Tablica Stacji/)
 })
 
 test("production line: training line shows 5/5 today with per-agent attribution", async () => {
   const page = await (await fetch(`${BASE}/production-line`)).text()
-  assert.match(page, /Training quota/)
+  assert.match(page, /Limit treningu/)
   assert.match(page, /5\/5/)
-  assert.match(page, /Training Line \(5\)/)
+  assert.match(page, /Linia Treningowa \(5\)/)
   // training tasks carry a source badge and their producing agent
-  assert.match(page, /training/)
+  assert.match(page, /trening/)
   for (const agent of ["MA", "SA", "DA", "RA", "QAA"]) {
     assert.match(page, new RegExp(`>${agent}<`), `training task by ${agent} must be visible`)
   }
@@ -475,14 +475,14 @@ test("production line: training line shows 5/5 today with per-agent attribution"
 
 test("production line: client line shows demo client, service, path, output id, next action", async () => {
   const page = await (await fetch(`${BASE}/production-line`)).text()
-  assert.match(page, /Client Line/)
+  assert.match(page, /Linia Klienta/)
   assert.match(page, /HVAC TestCo/)
   assert.match(page, /AI Workflow Audit \+ Mini Demo/)
   assert.match(page, /GoodCo/)
   // client task ties to its output + order and states the next operator action
-  assert.match(page, /station: (delivery|strategy)/)
+  assert.match(page, /stacja: (Realizacja|Strategia)/)
   assert.match(page, /output dd-order-/)
-  assert.match(page, /Next:/)
+  assert.match(page, /Dalej:/)
 })
 
 test("production line: rework line shows feedback, constraints, and revision after a cycle", async () => {
@@ -502,9 +502,9 @@ test("production line: rework line shows feedback, constraints, and revision aft
 
   // Before running the cycle, the rework line must show the flagged item + feedback
   const flagged = await (await fetch(`${BASE}/production-line`)).text()
-  assert.match(flagged, /Rework Line \(1\)/)
+  assert.match(flagged, /Linia Poprawek \(1\)/)
   assert.match(flagged, /Make it specific for a 10-person HVAC install team\./)
-  assert.match(flagged, /Operator feedback:|constraints:/)
+  assert.match(flagged, /ograniczenia:/)
 
   // Run the cycle → regenerates; GoodCo returns to ready_for_review, rev bumped
   const run = await fetch(`${BASE}/api/daily`, {
@@ -523,20 +523,20 @@ test("production line: rework line shows feedback, constraints, and revision aft
 
 test("production line: delivery pack line shows the warehoused pack + packaging station", async () => {
   const page = await (await fetch(`${BASE}/production-line`)).text()
-  assert.match(page, /Delivery Pack Line \(1\)/)
-  assert.match(page, /warehouse_ready|Packaging/)
+  assert.match(page, /Linia Pakietów Dostawy \(1\)/)
+  assert.match(page, /gotowe do magazynu|Pakowanie/)
   assert.match(page, /pack-/)
 })
 
 test("admin: compact Agent Production Line section links to /production-line", async () => {
   const admin = await (await fetch(`${BASE}/admin`)).text()
-  assert.match(admin, /Agent Production Line/)
+  assert.match(admin, /Linia Produkcyjna Agentów/)
   assert.match(admin, /href="\/production-line"/)
-  assert.match(admin, /Active client tasks/)
-  assert.match(admin, /Rework tasks/)
-  assert.match(admin, /Pack tasks waiting/)
+  assert.match(admin, /Aktywne zadania klienckie/)
+  assert.match(admin, /Zadania poprawek/)
+  assert.match(admin, /Zadania pakietów czekające/)
   // the compact station table renders all stations
-  assert.match(admin, /Operator Review/)
+  assert.match(admin, /Przegląd Operatora/)
 })
 
 test("/api/production-line is read-only and returns a useful production view", async () => {
@@ -576,14 +576,14 @@ test("GET /production-line does not mutate the store", async () => {
 
 test("integrity guard: /admin renders the Pinocchio panel with all 5 producers healthy", async () => {
   const admin = await (await fetch(`${BASE}/admin`)).text()
-  assert.match(admin, /Integrity Guard — Pinocchio Monitor/)
+  assert.match(admin, /Integrity Guard — Monitor Pinokia/)
   assert.match(admin, /Reset \(God Layer\)|—/)
   for (const agent of ["MA", "SA", "DA", "RA", "QAA"]) {
     assert.match(admin, new RegExp(`<td class="mono">${agent}</td>`), `producer ${agent} must be listed`)
   }
   // HRAR explanation is visible so the operator understands the rule
-  assert.match(admin, /quarantines the agent from client production/)
-  assert.match(admin, /training stays allowed/i)
+  assert.match(admin, /kwarantannuje agenta z produkcji klienckiej/)
+  assert.match(admin, /trening pozostaje dozwolony/i)
 
   // /api/admin/state exposes the same records, read-only
   const state = (await (await fetch(`${BASE}/api/admin/state`)).json()) as {
@@ -718,27 +718,27 @@ test("paused autopilot remains paused after a real server restart", async () => 
   assert.equal(off.status, 200)
   assert.equal((dataFile("settings.json") as { autopilotEnabled: boolean }).autopilotEnabled, false)
   const pageBefore = await (await fetch(`${BASE}/`)).text()
-  assert.match(pageBefore, /autopilot OFF/)
+  assert.match(pageBefore, /autopilot WYŁ\./)
 
   // Full process restart on the same data dir
   await stopServer()
   await startServer()
 
   const pageAfter = await (await fetch(`${BASE}/`)).text()
-  assert.match(pageAfter, /autopilot OFF/, "pause must survive a restart")
+  assert.match(pageAfter, /autopilot WYŁ\./, "pause must survive a restart")
   const adminAfter = await (await fetch(`${BASE}/admin`)).text()
-  assert.match(adminAfter, /autopilot OFF/, "admin cockpit must show the persisted OFF state")
-  assert.match(adminAfter, /Factory is paused because autopilot is OFF/, "standing-still reason must explain the pause")
+  assert.match(adminAfter, /autopilot WYŁ\./, "admin cockpit must show the persisted OFF state")
+  assert.match(adminAfter, /Fabryka jest wstrzymana, bo autopilot jest WYŁĄCZONY/, "standing-still reason must explain the pause")
   // Boss header must survive the restart from persisted work runs, not an
   // in-memory summary string: the last run before restart was the rework cycle
   // triggered by the production-line rework test above.
-  assert.match(adminAfter, /last cycle: REWORK_MODE · completed · via daily_run/)
-  assert.doesNotMatch(adminAfter, /none recorded yet/)
+  assert.match(adminAfter, /ostatni cykl: TRYB POPRAWEK · zakończone · via daily_run/)
+  assert.doesNotMatch(adminAfter, /jeszcze nic nie zarejestrowano/)
   assert.equal((dataFile("settings.json") as { autopilotEnabled: boolean }).autopilotEnabled, false)
 
   // Paused + drafts pending: next action must point at the review queue, NOT
   // at resuming autopilot (resuming clears nothing at the review gate).
-  assert.match(adminAfter, /Review training assets/)
+  assert.match(adminAfter, /Przejrzyj zasoby treningowe/)
   const state = (await (await fetch(`${BASE}/api/admin/state`)).json()) as {
     autopilotEnabled: boolean
     nextOperatorAction: { title: string }
@@ -747,6 +747,6 @@ test("paused autopilot remains paused after a real server restart", async () => 
   assert.equal(state.autopilotEnabled, false)
   assert.equal(state.waiting.ordersReadyForReview, 0)
   assert.ok(state.waiting.trainingDrafts >= 1)
-  assert.equal(state.nextOperatorAction.title, "Review training assets",
+  assert.equal(state.nextOperatorAction.title, "Przejrzyj zasoby treningowe",
     "paused autopilot must not outrank pending review queues")
 })

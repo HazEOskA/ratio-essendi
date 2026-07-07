@@ -25,14 +25,14 @@ import type {
 import { getAgent } from "./registry.js"
 
 const STATION_DEFS: { id: ProductionStationId; name: string; agentId: AgentId; purpose: string }[] = [
-  { id: "intake", name: "Intake", agentId: "N", purpose: "Read order/training/service context and decide the production path" },
-  { id: "research", name: "Research", agentId: "RA", purpose: "Extract context, risks, assumptions, audience, unknowns" },
-  { id: "strategy", name: "Strategy", agentId: "SA", purpose: "Define commercial angle, offer logic, client-facing argument" },
-  { id: "content", name: "Content", agentId: "MA", purpose: "Draft the actual deliverable sections" },
-  { id: "delivery", name: "Delivery", agentId: "DA", purpose: "Turn raw work into a usable client artifact / implementation plan" },
-  { id: "qa", name: "QA", agentId: "QAA", purpose: "Check safety, clarity, missing sections, operator risks" },
-  { id: "packaging", name: "Packaging", agentId: "N", purpose: "Prepare the delivery pack / warehouse candidate" },
-  { id: "operator_review", name: "Operator Review", agentId: "N", purpose: "Human operator: approve, rework, reject, warehouse (God Layer)" },
+  { id: "intake", name: "Przyjęcie", agentId: "N", purpose: "Odczytuje kontekst zlecenia/treningu/usługi i wybiera ścieżkę produkcji" },
+  { id: "research", name: "Badania", agentId: "RA", purpose: "Wyodrębnia kontekst, ryzyka, założenia, odbiorców, niewiadome" },
+  { id: "strategy", name: "Strategia", agentId: "SA", purpose: "Definiuje kąt komercyjny, logikę oferty, argument dla klienta" },
+  { id: "content", name: "Treść", agentId: "MA", purpose: "Tworzy szkic właściwych sekcji deliverabla" },
+  { id: "delivery", name: "Realizacja", agentId: "DA", purpose: "Zamienia surową pracę w użyteczny artefakt dla klienta / plan wdrożenia" },
+  { id: "qa", name: "QA", agentId: "QAA", purpose: "Sprawdza bezpieczeństwo, jasność, brakujące sekcje, ryzyka operatora" },
+  { id: "packaging", name: "Pakowanie", agentId: "N", purpose: "Przygotowuje pakiet dostawy / kandydata do magazynu" },
+  { id: "operator_review", name: "Przegląd Operatora", agentId: "N", purpose: "Człowiek-operator: zatwierdza, poprawia, odrzuca, magazynuje (God Layer)" },
 ]
 
 /** Which producing station a department maps to. */
@@ -67,20 +67,20 @@ function clientOrderTask(order: ClientOrder, digital: DailyDigital | undefined):
   if (!digital) {
     status = "queued"
     nextStation = station
-    nextOperatorAction = "Run cycle to produce this order's deliverable"
+    nextOperatorAction = "Uruchom cykl, by wyprodukować deliverable tego zlecenia"
   } else if (digital.status === "needs_rework") {
     status = "blocked"
     nextStation = station
-    nextOperatorAction = "Run cycle to regenerate the flagged deliverable"
+    nextOperatorAction = "Uruchom cykl, by odtworzyć oznaczony deliverable"
   } else if (digital.status === "draft_ready") {
     status = "waiting_review"
     nextStation = "operator_review"
-    nextOperatorAction = "Review client output → Approve to Delivery Pack, Rework, or Reject"
+    nextOperatorAction = "Przejrzyj wynik klienta → Zatwierdź do Pakietu Dostawy, Popraw lub Odrzuć"
   } else {
     // accepted / warehoused
     status = "completed"
     nextStation = "packaging"
-    nextOperatorAction = "Create / advance the delivery pack"
+    nextOperatorAction = "Utwórz / przenieś dalej pakiet dostawy"
   }
   return {
     id: `plt-order-${order.id}`,
@@ -92,7 +92,7 @@ function clientOrderTask(order: ClientOrder, digital: DailyDigital | undefined):
     department: order.department,
     title: order.serviceName ? `${order.serviceName} — ${order.clientName}` : `${order.department} — ${order.clientName}`,
     inputSummary: short(order.description),
-    outputSummary: digital ? short(digital.title, 120) : "Not produced yet",
+    outputSummary: digital ? short(digital.title, 120) : "Jeszcze nie wyprodukowano",
     ...(digital ? { outputId: digital.id } : {}),
     orderId: order.id,
     clientName: order.clientName,
@@ -110,16 +110,16 @@ function trainingTask(d: DailyDigital): AgentProductionTask {
   let nextOperatorAction: string
   if (d.status === "needs_rework") {
     status = "blocked"
-    nextOperatorAction = "Run cycle to regenerate this training draft"
+    nextOperatorAction = "Uruchom cykl, by odtworzyć ten szkic treningowy"
   } else if (d.status === "draft_ready") {
     status = "waiting_review"
-    nextOperatorAction = "Accept, Warehouse, Rework, or Reject this training asset"
+    nextOperatorAction = "Zaakceptuj, Zmagazynuj, Popraw lub Odrzuć ten zasób treningowy"
   } else if (d.status === "rejected") {
     status = "skipped"
-    nextOperatorAction = "Rejected — no action needed"
+    nextOperatorAction = "Odrzucono — nie wymaga akcji"
   } else {
     status = "completed"
-    nextOperatorAction = d.location === "warehouse" ? "Warehoused — no action needed" : "Accepted — no action needed"
+    nextOperatorAction = d.location === "warehouse" ? "Zmagazynowano — nie wymaga akcji" : "Zaakceptowano — nie wymaga akcji"
   }
   return {
     id: `plt-train-${d.id}`,
@@ -130,8 +130,8 @@ function trainingTask(d: DailyDigital): AgentProductionTask {
     agentName: agentName(d.createdByAgentId),
     department: d.department,
     title: short(d.title, 120),
-    inputSummary: `Daily training mission — ${d.department}/${d.taskType ?? "task"} (${d.date})`,
-    outputSummary: `${d.type} · score ${d.qualityScore}`,
+    inputSummary: `Dzienna misja treningowa — ${d.department}/${d.taskType ?? "task"} (${d.date})`,
+    outputSummary: `${d.type} · wynik ${d.qualityScore}`,
     outputId: d.id,
     revisionCount: d.revisionCount,
     qualityScore: d.qualityScore,
@@ -150,9 +150,9 @@ function reworkTask(d: DailyDigital, order: ClientOrder | undefined): AgentProdu
     agentId: d.createdByAgentId,
     agentName: agentName(d.createdByAgentId),
     department: d.department,
-    title: `Rework: ${short(d.title, 100)}`,
-    inputSummary: `Operator feedback: ${short(d.operatorFeedback ?? "(no text)", 120)}`,
-    outputSummary: `Awaiting regeneration (currently rev ${d.revisionCount})`,
+    title: `Poprawka: ${short(d.title, 100)}`,
+    inputSummary: `Feedback operatora: ${short(d.operatorFeedback ?? "(brak tekstu)", 120)}`,
+    outputSummary: `Oczekuje na odtworzenie (obecnie rev ${d.revisionCount})`,
     outputId: d.id,
     ...(d.orderId ? { orderId: d.orderId } : {}),
     ...(order ? { clientName: order.clientName } : {}),
@@ -160,11 +160,11 @@ function reworkTask(d: DailyDigital, order: ClientOrder | undefined): AgentProdu
     revisionCount: d.revisionCount,
     qualityScore: d.qualityScore,
     constraintsApplied: [
-      ...(order ? [`Client brief from ${order.clientName}: ${short(order.description, 100)}`] : []),
+      ...(order ? [`Brief klienta od ${order.clientName}: ${short(order.description, 100)}`] : []),
       ...(d.operatorFeedback ? [d.operatorFeedback] : []),
     ],
     nextStation: station,
-    nextOperatorAction: "Run cycle to apply the feedback and regenerate",
+    nextOperatorAction: "Uruchom cykl, by zastosować feedback i odtworzyć",
   }
 }
 
@@ -175,14 +175,14 @@ function packTask(p: DeliveryPack): AgentProductionTask {
   if (p.status === "draft") {
     status = "ready_for_operator"
     nextStation = "operator_review"
-    nextOperatorAction = "Approve the delivery pack on /delivery"
+    nextOperatorAction = "Zatwierdź pakiet dostawy na /delivery"
   } else if (p.status === "approved") {
     status = "ready_for_operator"
     nextStation = "operator_review"
-    nextOperatorAction = "Warehouse the approved pack → creates a case record"
+    nextOperatorAction = "Zmagazynuj zatwierdzony pakiet → tworzy kartę sprawy"
   } else {
     status = "completed"
-    nextOperatorAction = "warehouse_ready — copy the pack and deliver it yourself"
+    nextOperatorAction = "gotowe do magazynu — skopiuj pakiet i dostarcz go samodzielnie"
   }
   return {
     id: `plt-pack-${p.id}`,
@@ -192,7 +192,7 @@ function packTask(p: DeliveryPack): AgentProductionTask {
     agentId: "N",
     agentName: agentName("N"),
     title: `${p.serviceName} — ${p.clientName}`,
-    inputSummary: `Source output ${p.sourceOutputId} (order ${p.orderId})`,
+    inputSummary: `Wyjście źródłowe ${p.sourceOutputId} (zlecenie ${p.orderId})`,
     outputSummary: short(p.executiveSummary, 140),
     outputId: p.sourceOutputId,
     orderId: p.orderId,
@@ -270,9 +270,9 @@ export function deriveProductionLine(
             status: "completed" as AgentProductionTask["status"],
             agentId: "N" as AgentId,
             agentName: agentName("N"),
-            title: "Intake & path decision",
-            inputSummary: `${state.orders.length} order(s), ${trainingLine.length} training task(s) today`,
-            outputSummary: `Mode ${ctx.mode}; production paths assigned to producer stations`,
+            title: "Przyjęcie i wybór ścieżki",
+            inputSummary: `Zlecenia: ${state.orders.length}, zadania treningowe dziś: ${trainingLine.length}`,
+            outputSummary: `Tryb ${ctx.mode}; ścieżki produkcji przypisane do stacji producentów`,
             nextOperatorAction: ctx.nextOperatorAction,
           }]
         : []

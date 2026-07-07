@@ -557,7 +557,7 @@ test("autonomous cycle: open order → CLIENT_MODE, deliverable produced, no tra
     assert.equal(run.mode, "CLIENT_MODE")
     assert.equal(run.status, "completed")
     assert.equal(run.trigger, "manual")
-    assert.equal(run.nextOperatorAction, "Review client order")
+    assert.equal(run.nextOperatorAction, "Przejrzyj zlecenie klienta")
     assert.ok(run.outputsCreated.some((id) => id.startsWith("dd-order-")))
     assert.ok(
       run.steps.some((s) => s.agentId === "DA" && s.jobType === "client_order_production" && s.outputId),
@@ -603,7 +603,7 @@ test("autonomous cycle: second run same day is IDLE (bounded, no queue spam)", a
     assert.equal(store.snapshot().workRuns.length, 2, "idle cycles are still recorded")
     const idleRun = store.getLastWorkRun()!
     assert.equal(idleRun.mode, "IDLE")
-    assert.match(idleRun.idleReason ?? "", /Factory is waiting for operator review|training quota/)
+    assert.match(idleRun.idleReason ?? "", /Fabryka czeka na przegląd operatora|limit treningu/)
     assert.equal(idleRun.outputsCreated.length, 0)
   } finally {
     cleanup()
