@@ -4999,7 +4999,14 @@ function json(res, data, status = 200) {
   res.end(JSON.stringify(data));
 }
 var requestHandler = async (req, res) => {
-  const url = req.url ?? "/";
+  const rawUrl = req.url ?? "/";
+  const parsed = new URL(rawUrl, "http://internal");
+  let url = parsed.pathname;
+  if (url === "/api/index") {
+    const original = parsed.searchParams.get("__path") ?? "/";
+    url = original.startsWith("/") ? original : `/${original}`;
+  }
+  if (url.length > 1 && url.endsWith("/")) url = url.slice(0, -1);
   const method = req.method ?? "GET";
   const state = store.snapshot();
   try {
@@ -5091,7 +5098,7 @@ var requestHandler = async (req, res) => {
           caseRecords: [...state.caseRecords].reverse().slice(0, 20)
         });
       }
-      return html(res, "<h1>404</h1>", 404);
+      return html(res, `<h1>404</h1><p>${E(method)} ${E(url)} (raw: ${E(rawUrl)})</p>`, 404);
     }
     if (method === "POST" && url === "/api/signal") {
       const params = await readBody(req);
@@ -5350,7 +5357,7 @@ var requestHandler = async (req, res) => {
       }
       return html(res, renderFactory(store.snapshot(), `Autopilot ${autopilotEnabled ? "wznowiony" : "wstrzymany"}.`));
     }
-    html(res, "<h1>404</h1>", 404);
+    html(res, `<h1>404</h1><p>${E(method)} ${E(url)} (raw: ${E(rawUrl)})</p>`, 404);
   } catch (err) {
     console.error(err);
     html(res, `<pre>500: ${E(String(err))}</pre>`, 500);

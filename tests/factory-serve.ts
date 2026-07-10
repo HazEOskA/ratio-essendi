@@ -1883,7 +1883,18 @@ function json(res: import("node:http").ServerResponse, data: unknown, status = 2
  * it directly with Node's (req, res) — no listener, no background timer.
  */
 export const requestHandler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-  const url = req.url ?? "/"
+  const rawUrl = req.url ?? "/"
+  const parsed = new URL(rawUrl, "http://internal")
+  let url = parsed.pathname
+  // On Vercel the catch-all rewrite may hand the function its DESTINATION path
+  // instead of the visitor's path; the rewrite therefore carries the original
+  // path explicitly as ?__path=/... — recover it so routing sees /admin, not
+  // /api/index. Locally __path never appears and this is a no-op.
+  if (url === "/api/index") {
+    const original = parsed.searchParams.get("__path") ?? "/"
+    url = original.startsWith("/") ? original : `/${original}`
+  }
+  if (url.length > 1 && url.endsWith("/")) url = url.slice(0, -1)
   const method = req.method ?? "GET"
   const state = store.snapshot()
 
@@ -1979,7 +1990,7 @@ export const requestHandler = async (req: IncomingMessage, res: ServerResponse):
         })
       }
 
-      return html(res, "<h1>404</h1>", 404)
+      return html(res, `<h1>404</h1><p>${E(method)} ${E(url)} (raw: ${E(rawUrl)})</p>`, 404)
     }
 
     if (method === "POST" && url === "/api/signal") {
@@ -2285,7 +2296,7 @@ export const requestHandler = async (req: IncomingMessage, res: ServerResponse):
       return html(res, renderFactory(store.snapshot(), `Autopilot ${autopilotEnabled ? "wznowiony" : "wstrzymany"}.`))
     }
 
-    html(res, "<h1>404</h1>", 404)
+    html(res, `<h1>404</h1><p>${E(method)} ${E(url)} (raw: ${E(rawUrl)})</p>`, 404)
   } catch (err) {
     console.error(err)
     html(res, `<pre>500: ${E(String(err))}</pre>`, 500)
