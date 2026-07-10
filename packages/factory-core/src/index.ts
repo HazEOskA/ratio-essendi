@@ -43,6 +43,7 @@ export type {
   ProductionLineView,
   AgentIntegrityRecord,
   AgentIntegrityStatus,
+  AcquisitionProspect,
 } from "./types.js"
 
 export { JsonStore, FactoryStore } from "./store.js"
@@ -78,3 +79,11 @@ export {
   PRODUCER_AGENTS,
 } from "./integrity.js"
 export type { IntegrityResetReason } from "./integrity.js"
+export {
+  registerAcquisitionProspect,
+  sendAcquisitionOutreach,
+  recordAcquisitionReply,
+  acquireClientFromProspect,
+  ACQUISITION_DAILY_SEND_LIMIT,
+  ACQUISITION_SERVICE_ID,
+} from "./acquisition.js"

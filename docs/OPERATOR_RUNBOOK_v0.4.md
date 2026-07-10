@@ -7,8 +7,9 @@ cockpit. It runs the loop:
 
 SERVICE → CLIENT ORDER → FACTORY WORK → REVIEW → REWORK → APPROVAL → DELIVERY PACK → WAREHOUSE → CASE RECORD
 
-Foundational rule: **autonomy of thinking without autonomy of action.**
-The factory produces and prepares; the operator approves and delivers.
+Foundational rule: **bounded autonomy with auditable external action.**
+The factory may run the narrowly configured Client Acquisition Loop; production
+and delivery still remain behind operator review.
 
 ## 2. What it can do
 
@@ -23,7 +24,7 @@ The factory produces and prepares; the operator approves and delivers.
 
 ## 3. What it cannot do (by design)
 
-- Send email, publish, scrape, contact leads, spend money, touch a CRM
+- Bulk email, publish, scrape arbitrary sites, spend money, or touch a CRM
 - Deliver anything to a client — you copy the pack and deliver it yourself
 - Run multi-instance — one server per `.factory-data` directory
 
@@ -36,6 +37,8 @@ npm run factory:serve
 ```
 
 Open `http://localhost:7778/admin` (cockpit) and `http://localhost:7778/factory-run` (one-page business loop).
+
+Client Acquisition is at `http://localhost:7778/acquisition`.
 
 ## 5. First client workflow
 
@@ -84,7 +87,9 @@ an active demo order.
 
 ## 10. Safety rules
 
-- No external send of any kind; approval gate on every path out
+- Offer and delivery paths never auto-send
+- Acquisition outreach is allowed only with verified public evidence, an HTTPS
+  webhook, explicit `ACQUISITION_AUTO_SEND=true`, and a hard limit of 3/day
 - Autopilot is bounded (orders once, reworks only when flagged, training 5/day)
 - GET pages and debug endpoints never mutate state
 - Every decision is an event in the log
@@ -183,6 +188,43 @@ optional note, the nose value before the reset, and `"Reset by: operator
 Nothing here sends anything anywhere; the guard only restricts what the
 factory may produce until you decide otherwise, and every decision — quarantine
 or reset — is a reason-bearing event in the log.
+
+## 11c. Client Acquisition Loop (`/acquisition`)
+
+The acquisition loop is separate from the five fictional `PROSPECT_POOL`
+records. A real prospect is persisted only after the operator/research process
+provides company, website, country, segment, at least one concrete pain signal,
+public evidence URL + summary, and (for outreach) a public business email with
+its source URL. The runtime scores the record for the locked ICP: Dutch
+recruitment/HR agencies buying `AI Workflow Audit + Mini Demo` or
+`Recruitment / Agency Ops Workflow Audit`.
+
+To enable automated first contact, configure:
+
+```text
+ACQUISITION_AUTO_SEND=true
+OUTREACH_WEBHOOK_URL=https://your-provider.example/send
+OUTREACH_WEBHOOK_TOKEN=optional-secret
+ACQUISITION_ADMIN_USER=osa
+ACQUISITION_ADMIN_PASSWORD=strong-random-secret
+```
+
+The webhook receives JSON `{to, subject, body}` and must return
+`{messageId, sentAt?}`. Without a successful provider response the prospect
+does not move to `contacted`. The runtime sends only `outreach_ready` records,
+only once, maximum 3 per UTC day. A `do_not_contact` outcome is terminal.
+
+Replies are recorded as `interested`, `not_interested`, or `do_not_contact`.
+The `Confirm client` action is available only after an interested reply and
+requires agreement/payment proof of at least 10 characters. It then creates a
+real factory order and logs `acquisition.client_acquired`. This is the only
+path that increments the client count.
+
+On public hosting `/acquisition` and `/api/acquisition` fail closed unless
+`ACQUISITION_ADMIN_PASSWORD` is configured; the browser uses HTTP Basic Auth.
+Automated outreach is intentionally disabled on the Vercel preview because its
+`/tmp` state is ephemeral and cannot enforce deduplication or daily limits
+across cold starts. Run the sender on the persistent local/VPS runtime.
 
 ## 12. Definition of done for a client run
 

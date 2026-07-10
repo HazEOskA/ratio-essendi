@@ -18,6 +18,7 @@ import type {
   CaseRecord,
   AgentIntegrityRecord,
   MissionAgentId,
+  AcquisitionProspect,
 } from "./types.js"
 
 export class JsonStore<T> {
@@ -71,6 +72,7 @@ export class FactoryStore {
   readonly #deliveryPacks: JsonStore<DeliveryPack[]>
   readonly #caseRecords: JsonStore<CaseRecord[]>
   readonly #integrity: JsonStore<AgentIntegrityRecord[]>
+  readonly #acquisitionProspects: JsonStore<AcquisitionProspect[]>
 
   constructor(dataDir: string) {
     const p = (name: string) => join(dataDir, `${name}.json`)
@@ -89,6 +91,7 @@ export class FactoryStore {
     this.#deliveryPacks = new JsonStore(p("delivery-packs"), [])
     this.#caseRecords = new JsonStore(p("case-records"), [])
     this.#integrity = new JsonStore(p("integrity"), [])
+    this.#acquisitionProspects = new JsonStore(p("acquisition-prospects"), [])
   }
 
   snapshot(): FactoryState {
@@ -107,6 +110,7 @@ export class FactoryStore {
       deliveryPacks: this.#deliveryPacks.read(),
       caseRecords: this.#caseRecords.read(),
       integrity: this.#integrity.read(),
+      acquisitionProspects: this.#acquisitionProspects.read(),
     }
   }
 
@@ -228,6 +232,31 @@ export class FactoryStore {
       if (idx === -1) return [...arr, rec]
       return arr.map((r, i) => (i === idx ? rec : r))
     })
+  }
+
+  // --- Client acquisition loop ---
+
+  addAcquisitionProspect(prospect: AcquisitionProspect): void {
+    const duplicate = this.#acquisitionProspects.read().find(
+      (item) => item.website === prospect.website ||
+        (item.channel?.address && item.channel.address === prospect.channel?.address),
+    )
+    if (duplicate) throw new Error(`duplicate prospect: ${duplicate.id}`)
+    this.#acquisitionProspects.update((arr) => [...arr, prospect])
+  }
+
+  getAcquisitionProspect(id: string): AcquisitionProspect | undefined {
+    return this.#acquisitionProspects.read().find((item) => item.id === id)
+  }
+
+  updateAcquisitionProspect(id: string, patch: Partial<AcquisitionProspect>): void {
+    this.#acquisitionProspects.update((arr) => arr.map((item) =>
+      item.id === id ? { ...item, ...patch } : item,
+    ))
+  }
+
+  countAcquisitionContactsForDate(date: string): number {
+    return this.#acquisitionProspects.read().filter((item) => item.firstContactAt?.startsWith(date)).length
   }
 
   // --- Settings (survive restarts) ---

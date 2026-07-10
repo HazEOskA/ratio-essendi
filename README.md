@@ -73,6 +73,17 @@ npm test            # node:test assertions
 npm run typecheck   # strict tsc --noEmit across the monorepo
 ```
 
+### Client acquisition loop
+
+Open `/acquisition` on the factory server to register evidence-backed Dutch
+recruitment/HR prospects, qualify them, prepare a personalized first-contact
+message, track replies, and convert a proven interested prospect into a real
+client order. Automated outreach is disabled by default and requires an HTTPS
+webhook plus `ACQUISITION_AUTO_SEND=true`; the hard limit is 3 contacts/day.
+See `docs/OPERATOR_RUNBOOK_v0.4.md` section 11c for the exact provider contract.
+Public acquisition routes require Basic Auth, and sending runs only on a
+persistent local/VPS instance — never from the ephemeral Vercel preview.
+
 ### Real output (`npm run offer`)
 
 The first product agent (`@ratio-essendi/offer-builder`) generates a real offer

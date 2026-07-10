@@ -13,7 +13,8 @@
     "@ratio-essendi/shared": "*",
     "@ratio-essendi/evaluation-engine": "*",
     "@ratio-essendi/offer-builder": "*",
-    "@ratio-essendi/integrity-guard": "*"
+    "@ratio-essendi/integrity-guard": "*",
+    "@ratio-essendi/prospecting": "*"
   },
   "license": "UNLICENSED"
 }

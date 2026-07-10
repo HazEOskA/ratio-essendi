@@ -1,3 +1,5 @@
+import type { AcquisitionProspect } from "@ratio-essendi/prospecting"
+
 // A–N = Offer Acquisition Line agents; MA/SA/DA/RA/QAA = Daily Mission agents
 export type AgentId =
   | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N"
@@ -397,4 +399,7 @@ export type FactoryState = {
   deliveryPacks: DeliveryPack[]
   caseRecords: CaseRecord[]
   integrity: AgentIntegrityRecord[]
+  acquisitionProspects: AcquisitionProspect[]
 }
+
+export type { AcquisitionProspect } from "@ratio-essendi/prospecting"

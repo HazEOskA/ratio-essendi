@@ -42,7 +42,16 @@ import {
   INTEGRITY_LIMITS,
   INTEGRITY_RESET_REASONS,
   PRODUCER_AGENTS,
+  registerAcquisitionProspect,
+  sendAcquisitionOutreach,
+  recordAcquisitionReply,
+  acquireClientFromProspect,
+  ACQUISITION_DAILY_SEND_LIMIT,
 } from "@ratio-essendi/factory-core"
+import {
+  buildRecruitmentAuditOutreach,
+  type OutreachSender,
+} from "@ratio-essendi/prospecting"
 import type {
   FactoryState,
   PipelineResult,
@@ -58,7 +67,7 @@ import type {
   AgentProductionTask,
   AgentStationStatus,
 } from "@ratio-essendi/factory-core"
-import { randomUUID } from "node:crypto"
+import { randomUUID, timingSafeEqual } from "node:crypto"
 
 // PORT is env-overridable so the HTTP test suite can run on a free port.
 const PORT = Number(process.env["PORT"] ?? 7778)
@@ -70,6 +79,70 @@ const DATA_DIR = process.env["FACTORY_DATA_DIR"] ?? (ON_VERCEL ? "/tmp/.factory-
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
 
 const store = new FactoryStore(DATA_DIR)
+const ACQUISITION_AUTO_SEND = process.env["ACQUISITION_AUTO_SEND"] === "true"
+const OUTREACH_WEBHOOK_URL = process.env["OUTREACH_WEBHOOK_URL"]
+const OUTREACH_WEBHOOK_TOKEN = process.env["OUTREACH_WEBHOOK_TOKEN"]
+const ACQUISITION_ADMIN_USER = process.env["ACQUISITION_ADMIN_USER"] ?? "osa"
+const ACQUISITION_ADMIN_PASSWORD = process.env["ACQUISITION_ADMIN_PASSWORD"]
+
+function safeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a)
+  const right = Buffer.from(b)
+  return left.length === right.length && timingSafeEqual(left, right)
+}
+
+function acquisitionAuthorized(req: IncomingMessage): boolean {
+  // Local/VPS development can stay open on loopback when no password is set.
+  // Vercel is public, so missing credentials fail closed.
+  if (!ACQUISITION_ADMIN_PASSWORD) return !ON_VERCEL
+  const header = req.headers.authorization ?? ""
+  if (!header.startsWith("Basic ")) return false
+  try {
+    const decoded = Buffer.from(header.slice(6), "base64").toString("utf8")
+    const separator = decoded.indexOf(":")
+    if (separator < 0) return false
+    return safeEqual(decoded.slice(0, separator), ACQUISITION_ADMIN_USER) &&
+      safeEqual(decoded.slice(separator + 1), ACQUISITION_ADMIN_PASSWORD)
+  } catch {
+    return false
+  }
+}
+
+function rejectAcquisitionAccess(res: ServerResponse): void {
+  if (!ACQUISITION_ADMIN_PASSWORD) {
+    return html(res, "<h1>503</h1><p>Client Acquisition is locked: ACQUISITION_ADMIN_PASSWORD is not configured.</p>", 503)
+  }
+  res.writeHead(401, {
+    "Content-Type": "text/html; charset=utf-8",
+    "WWW-Authenticate": 'Basic realm="Ratio Essendi Acquisition", charset="UTF-8"',
+  })
+  res.end("<h1>401</h1><p>Authentication required.</p>")
+}
+
+const webhookSender: OutreachSender = {
+  async send(message) {
+    if (ON_VERCEL) throw new Error("automated outreach is disabled on ephemeral Vercel preview")
+    if (!ACQUISITION_AUTO_SEND) throw new Error("ACQUISITION_AUTO_SEND is not enabled")
+    if (!OUTREACH_WEBHOOK_URL) throw new Error("OUTREACH_WEBHOOK_URL is not configured")
+    const target = new URL(OUTREACH_WEBHOOK_URL)
+    if (target.protocol !== "https:" && target.hostname !== "127.0.0.1" && target.hostname !== "localhost") {
+      throw new Error("outreach webhook must use HTTPS")
+    }
+    const response = await fetch(target, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(OUTREACH_WEBHOOK_TOKEN ? { authorization: `Bearer ${OUTREACH_WEBHOOK_TOKEN}` } : {}),
+      },
+      body: JSON.stringify(message),
+    })
+    if (!response.ok) throw new Error(`outreach webhook failed: HTTP ${response.status}`)
+    const payload = await response.json().catch(() => ({})) as { messageId?: string; id?: string; sentAt?: string }
+    const providerMessageId = payload.messageId ?? payload.id
+    if (!providerMessageId) throw new Error("outreach webhook did not return messageId")
+    return { providerMessageId, sentAt: payload.sentAt ?? new Date().toISOString() }
+  },
+}
 
 // Autopilot: bounded autonomous cycle (client orders → reworks → daily training).
 // Everything it produces still stops at the operator review gate.
@@ -193,6 +266,7 @@ const nav = (active: string): string => {
     ["/production-line", "Linia Produkcyjna"],
     ["/orders", "Zlecenia"],
     ["/delivery", "Dostawy"],
+    ["/acquisition", "Pozyskanie"],
     ["/leads", "Leady"],
     ["/warehouse", "Magazyn"],
     ["/trash", "Kosz"],
@@ -238,6 +312,7 @@ tr:last-child td{border-bottom:none}
 .v.ok{color:#3fb950}.v.warn{color:#d29922}.v.bad{color:#f85149}.v.info{color:#58a6ff}
 .form-card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:14px;margin-bottom:18px}
 .form-card label{display:block;font-size:12px;color:#8b949e;margin-bottom:4px}
+.form-card input,.form-card select{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:13px ui-sans-serif,system-ui,sans-serif;padding:7px 10px;margin-bottom:7px}
 textarea{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:13px/1.5 ui-sans-serif,system-ui,sans-serif;padding:8px 10px;resize:vertical;min-height:80px}
 button{cursor:pointer;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#e6edf3;padding:5px 14px;font-size:13px;font-weight:600}
 button.ok{background:#11321f;color:#3fb950;border-color:#234b2e}
@@ -453,6 +528,77 @@ ${leads.map((l) => `<tr>
 </tr>`).join("")}
 </tbody>
 </table>`}`)
+}
+
+function acquisitionBadge(status: string): string {
+  if (status === "client_acquired" || status === "interested") return "ok"
+  if (status === "outreach_ready" || status === "contacted" || status === "replied") return "warn"
+  if (status === "not_interested" || status === "do_not_contact") return "bad"
+  return "muted"
+}
+
+function renderAcquisition(state: FactoryState, flash?: string): string {
+  const prospects = [...state.acquisitionProspects].reverse()
+  const ready = prospects.filter((item) => item.status === "outreach_ready").length
+  const contacted = prospects.filter((item) => item.status === "contacted" || item.status === "replied").length
+  const interested = prospects.filter((item) => item.status === "interested").length
+  const acquired = prospects.filter((item) => item.status === "client_acquired").length
+  const flashHtml = flash ? `<div class="flash ${flash.startsWith("Błąd") ? "bad" : ""}">${E(flash)}</div>` : ""
+  return layout("Pozyskanie Klientów", "/acquisition", `
+<h1>Client Acquisition Loop v0.1</h1>
+<p class="sub">NL recruitment/HR → dowody → kwalifikacja → zweryfikowany kontakt → odpowiedź → klient. Limit: ${ACQUISITION_DAILY_SEND_LIMIT}/dzień · ${badge(ACQUISITION_AUTO_SEND ? "AUTO-SEND WŁ." : "AUTO-SEND WYŁ.", ACQUISITION_AUTO_SEND ? "warn" : "muted")}</p>
+${flashHtml}
+<div class="stats">
+  <div class="stat"><div class="v info">${prospects.length}</div><div class="l">Prospekty</div></div>
+  <div class="stat"><div class="v warn">${ready}</div><div class="l">Gotowe</div></div>
+  <div class="stat"><div class="v info">${contacted}</div><div class="l">Kontakt</div></div>
+  <div class="stat"><div class="v ok">${interested}</div><div class="l">Zainteresowane</div></div>
+  <div class="stat"><div class="v ok">${acquired}</div><div class="l">Klienci</div></div>
+</div>
+
+<div class="form-card">
+  <h2 style="margin-top:0">Dodaj zweryfikowanego prospekta</h2>
+  <form method="POST" action="/api/acquisition">
+    <input type="hidden" name="action" value="register">
+    <input name="company" placeholder="Firma" required>
+    <input name="website" placeholder="Domena, np. agency.nl" required>
+    <input name="country" value="Netherlands" placeholder="Kraj" required>
+    <input name="segment" value="Recruitment agency" placeholder="Segment" required>
+    <input name="contactName" placeholder="Imię osoby (opcjonalnie)">
+    <input name="contactRole" placeholder="Rola (opcjonalnie)">
+    <input type="email" name="email" placeholder="Publiczny e-mail">
+    <input name="emailSourceUrl" placeholder="URL źródła e-maila">
+    <textarea name="painSignals" placeholder="Obserwowane problemy — jeden na linię" required></textarea>
+    <input name="evidenceUrl" placeholder="URL dowodu" required>
+    <textarea name="evidenceSummary" placeholder="Co dokładnie widać w źródle" required></textarea>
+    <button type="submit">Zarejestruj i oceń</button>
+  </form>
+</div>
+
+<h2>Pipeline (${prospects.length})</h2>
+${prospects.length === 0 ? '<p class="dim">Brak realnych prospectów. Demo fixture nie jest tutaj pokazywany.</p>' : prospects.map((prospect) => {
+  let prepared = ""
+  if (prospect.status === "outreach_ready") {
+    try {
+      const message = buildRecruitmentAuditOutreach(prospect)
+      prepared = `<div class="offer-pre"><strong>${E(message.subject)}</strong>\n\n${E(message.body)}</div>`
+    } catch { prepared = "" }
+  } else if (prospect.outreachBody) {
+    prepared = `<div class="offer-pre"><strong>${E(prospect.outreachSubject ?? "")}</strong>\n\n${E(prospect.outreachBody)}</div>`
+  }
+  return `<div class="form-card">
+    <div style="margin-bottom:6px">${badge(statusLabel(prospect.status), acquisitionBadge(prospect.status))} <strong>${E(prospect.company)}</strong> <span class="mono dim">${E(prospect.id)} · fit ${prospect.fitScore}</span></div>
+    <div class="dim" style="font-size:12px">${E(prospect.website)} · ${E(prospect.segment)} · ${E(prospect.country)}${prospect.channel ? ` · ${E(prospect.channel.address)}` : ""}</div>
+    <div style="font-size:12px;margin-top:5px">Ból: ${E(prospect.painSignals.join(" · ") || "—")}</div>
+    <div class="dim" style="font-size:11.5px">Dowody: ${prospect.evidence.map((item) => `<a href="${E(item.url)}">${E(item.summary)}</a>`).join(" · ") || "—"}</div>
+    ${prepared}
+    <div class="actions">
+      ${prospect.status === "outreach_ready" ? `<form method="POST" action="/api/acquisition"><input type="hidden" name="action" value="send"><input type="hidden" name="id" value="${E(prospect.id)}"><button class="ok" type="submit">Wyślij przez webhook</button></form>` : ""}
+      ${prospect.status === "contacted" || prospect.status === "replied" ? `<form method="POST" action="/api/acquisition"><input type="hidden" name="action" value="reply"><input type="hidden" name="id" value="${E(prospect.id)}"><select name="outcome"><option value="interested">zainteresowany</option><option value="not_interested">brak zainteresowania</option><option value="do_not_contact">nie kontaktować</option></select><input name="summary" placeholder="Treść / sens odpowiedzi" required><button type="submit">Zapisz odpowiedź</button></form>` : ""}
+      ${prospect.status === "interested" ? `<form method="POST" action="/api/acquisition"><input type="hidden" name="action" value="acquire"><input type="hidden" name="id" value="${E(prospect.id)}"><input name="proof" placeholder="Dowód zgody / płatności / zlecenia" required><button class="ok" type="submit">Potwierdź klienta i utwórz zlecenie</button></form>` : ""}
+    </div>
+  </div>`
+}).join("")}`)
 }
 
 function renderWarehouse(state: FactoryState): string {
@@ -1899,11 +2045,16 @@ export const requestHandler = async (req: IncomingMessage, res: ServerResponse):
   const state = store.snapshot()
 
   try {
+    if ((url === "/acquisition" || url === "/api/acquisition") && !acquisitionAuthorized(req)) {
+      rejectAcquisitionAccess(res)
+      return
+    }
     if (method === "GET") {
       if (url === "/" || url === "/factory") {
         return html(res, renderFactory(state))
       }
       if (url === "/leads") return html(res, renderLeads(state))
+      if (url === "/acquisition") return html(res, renderAcquisition(state))
       if (url === "/warehouse") return html(res, renderWarehouse(state))
       if (url === "/trash") return html(res, renderTrash(state))
       if (url === "/events") return html(res, renderEvents(state))
@@ -1989,8 +2140,58 @@ export const requestHandler = async (req: IncomingMessage, res: ServerResponse):
           caseRecords: [...state.caseRecords].reverse().slice(0, 20),
         })
       }
+      if (url === "/api/acquisition") {
+        return json(res, {
+          autoSendEnabled: ACQUISITION_AUTO_SEND,
+          dailyLimit: ACQUISITION_DAILY_SEND_LIMIT,
+          prospects: state.acquisitionProspects,
+        })
+      }
 
       return html(res, `<h1>404</h1><p>${E(method)} ${E(url)} (raw: ${E(rawUrl)})</p>`, 404)
+    }
+
+    if (method === "POST" && url === "/api/acquisition") {
+      const params = await readBody(req)
+      const action = params["action"] ?? ""
+      try {
+        if (action === "register") {
+          const painSignals = (params["painSignals"] ?? "").split(/\r?\n|;/).map((item) => item.trim()).filter(Boolean)
+          const prospect = registerAcquisitionProspect(store, {
+            company: params["company"] ?? "",
+            website: params["website"] ?? "",
+            country: params["country"] ?? "",
+            segment: params["segment"] ?? "",
+            ...(params["contactName"]?.trim() ? { contactName: params["contactName"].trim() } : {}),
+            ...(params["contactRole"]?.trim() ? { contactRole: params["contactRole"].trim() } : {}),
+            ...(params["email"]?.trim() ? { email: params["email"].trim() } : {}),
+            ...(params["emailSourceUrl"]?.trim() ? { emailSourceUrl: params["emailSourceUrl"].trim() } : {}),
+            painSignals,
+            evidence: [{ url: params["evidenceUrl"] ?? "", summary: params["evidenceSummary"] ?? "" }],
+          })
+          return html(res, renderAcquisition(store.snapshot(), `Prospekt ${prospect.company} zapisany — status ${prospect.status}, fit ${prospect.fitScore}.`))
+        }
+        const id = params["id"] ?? ""
+        if (action === "send") {
+          const prospect = await sendAcquisitionOutreach(store, id, webhookSender)
+          return html(res, renderAcquisition(store.snapshot(), `Outreach wysłany do ${prospect.company}; providerMessageId=${prospect.providerMessageId}.`))
+        }
+        if (action === "reply") {
+          const outcome = params["outcome"]
+          if (outcome !== "interested" && outcome !== "not_interested" && outcome !== "do_not_contact") {
+            throw new Error("invalid reply outcome")
+          }
+          const prospect = recordAcquisitionReply(store, id, outcome, params["summary"] ?? "")
+          return html(res, renderAcquisition(store.snapshot(), `Odpowiedź ${prospect.company} zapisana — ${prospect.status}.`))
+        }
+        if (action === "acquire") {
+          const prospect = acquireClientFromProspect(store, id, params["proof"] ?? "")
+          return html(res, renderAcquisition(store.snapshot(), `KLIENT ZDOBYTY: ${prospect.company} → zlecenie ${prospect.clientOrderId}.`))
+        }
+        throw new Error("unknown acquisition action")
+      } catch (err) {
+        return html(res, renderAcquisition(store.snapshot(), `Błąd: ${String(err)}`), 400)
+      }
     }
 
     if (method === "POST" && url === "/api/signal") {
@@ -2354,6 +2555,7 @@ server.listen(PORT, () => {
   console.log("  /api/work-runs   — read-only recent work runs (JSON)")
   console.log("  /factory-run  — run the whole business loop from one page")
   console.log("  /delivery     — delivery packs + case records")
+  console.log("  /acquisition  — verified prospect → outreach → reply → client")
   console.log("  /api/delivery-packs — read-only packs + cases (JSON)")
   console.log("  /production-line — agent production floor view")
   console.log("  /api/production-line — read-only production line (JSON)")

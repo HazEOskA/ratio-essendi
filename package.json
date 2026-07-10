@@ -19,7 +19,7 @@
     "dashboard:serve": "tsx tests/dashboard-serve.ts",
     "factory:serve": "tsx tests/factory-serve.ts",
     "build:vercel": "node scripts/build-vercel-bundle.mjs",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "keywords": [
     "ratio-essendi",
