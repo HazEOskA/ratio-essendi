@@ -12,6 +12,7 @@ dashboard.html
 # persisted runtime state
 .data/
 .factory-data/
+.vercel/
 
 # logs
 *.log

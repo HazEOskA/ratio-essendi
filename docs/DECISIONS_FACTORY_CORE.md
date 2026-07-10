@@ -105,3 +105,27 @@ The nose feeds on real signals, not simulated market data: operator rejections (
 **Audited reset.** `resetAgentIntegrity(store, agentId, reason, note?)` now requires `reason` — one of `false_positive | retrained | accepted_risk | operator_override | other` — as a mandatory parameter, not an optional afterthought. The HTTP layer (`POST /api/integrity`) validates in order: `agentId` present → known producer agent → `action === "reset"` → `reason` present → `reason` is a recognised value. Any failure returns `400` with zero store writes — a reset cannot happen by accident, and cannot happen without a stated justification. On success the logged `integrity.reset` event carries `previousNose`, `reason`, `note` (if given), the preserved breach count, and an explicit "Reset by: operator (God Layer)" marker, so the audit trail answers *who, why, and what it undid* without cross-referencing anything else.
 
 **Unchanged guarantees (restated, not re-decided):** HRAR quarantines an agent/department, never the HTTP process — `process.exit` remains opt-in and OFF inside the factory. A quarantined agent keeps training; it is only cut off from client production until reset. `breaches` is a lifetime counter and is never zeroed by a reset, audited or otherwise.
+
+## FC-026 — Client Acquisition Is Bounded Outreach, Not Bulk Automation
+
+The static `PROSPECT_POOL` remains a demo fixture. Real acquisition records are
+stored separately in `acquisition-prospects.json` and must carry a company
+domain, NL recruitment/HR segment, a concrete pain signal, public evidence, and
+a business email with its public source URL before they become
+`outreach_ready`. Domain/email deduplication persists across restarts.
+
+The operator can grant standing permission to send the first-contact message by
+setting `ACQUISITION_AUTO_SEND=true` and configuring `OUTREACH_WEBHOOK_URL`
+(HTTPS required) plus optional `OUTREACH_WEBHOOK_TOKEN`. The sender is capped at
+3 successful contacts per UTC day, sends once per prospect, records the provider
+message id, and fails closed when configuration or provider evidence is missing.
+This exception does not weaken `ApprovalItem.sent: false` or delivery gates.
+It is disabled on the Vercel preview because ephemeral `/tmp` state cannot
+enforce a cross-cold-start quota. Public acquisition routes require Basic Auth;
+without `ACQUISITION_ADMIN_PASSWORD` they fail closed.
+
+Status truth is structural: `contacted` requires a successful provider response;
+`interested` requires a recorded reply; `client_acquired` requires an interested
+reply plus explicit agreement/payment proof. Only then is a real client order
+created for `Recruitment / Agency Ops Workflow Audit`. A prepared message, sent
+email, or reply is never counted as a client.

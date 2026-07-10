@@ -12,18 +12,26 @@ import { fileURLToPath } from "node:url"
 import { tmpdir } from "node:os"
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
-const TSX_CLI = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs")
 const SERVER = join(ROOT, "tests", "factory-serve.ts")
 const PORT = 7871
 const BASE = `http://127.0.0.1:${PORT}`
+const ACQ_AUTH = `Basic ${Buffer.from("test:secret").toString("base64")}`
 
 const workDir = mkdtempSync(join(tmpdir(), "factory-serve-test-"))
 let child: ChildProcess | undefined
 
 async function startServer(): Promise<void> {
-  child = spawn(process.execPath, [TSX_CLI, SERVER], {
-    cwd: workDir,
-    env: { ...process.env, PORT: String(PORT) },
+  child = spawn(process.execPath, ["--import", "tsx", SERVER], {
+    // Resolve the tsx package from the repo, while keeping every persisted
+    // runtime file inside the isolated temp directory.
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      FACTORY_DATA_DIR: join(workDir, ".factory-data"),
+      ACQUISITION_ADMIN_USER: "test",
+      ACQUISITION_ADMIN_PASSWORD: "secret",
+    },
     stdio: "ignore",
   })
   for (let i = 0; i < 50; i++) {
@@ -50,7 +58,7 @@ async function stopServer(): Promise<void> {
 
 after(async () => {
   await stopServer()
-  rmSync(workDir, { recursive: true, force: true })
+  rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 const dataFile = (name: string) => JSON.parse(readFileSync(join(workDir, ".factory-data", name), "utf8"))
@@ -572,6 +580,72 @@ test("GET /production-line does not mutate the store", async () => {
   assert.equal(res.status, 200)
   const after = files.map((name) => [name, rawDataFile(name)])
   assert.deepEqual(after, before, "GET /production-line must not mutate the store")
+})
+
+test("client acquisition HTTP: verified prospect is registered and exposed read-only", async () => {
+  const res = await fetch(`${BASE}/api/acquisition`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", authorization: ACQ_AUTH },
+    body: new URLSearchParams({
+      action: "register",
+      company: "Dutch Recruit Test",
+      website: "dutch-recruit-test.nl",
+      country: "Netherlands",
+      segment: "Recruitment agency",
+      contactName: "Alex",
+      contactRole: "Director",
+      email: "hello@dutch-recruit-test.nl",
+      emailSourceUrl: "https://dutch-recruit-test.nl/contact",
+      painSignals: "Several active vacancies; manual candidate follow-up",
+      evidenceUrl: "https://dutch-recruit-test.nl/vacatures",
+      evidenceSummary: "Public vacancy page shows multiple active recruitment workflows.",
+    }),
+  })
+  assert.equal(res.status, 200)
+  assert.match(await res.text(), /Dutch Recruit Test/)
+
+  const before = rawDataFile("acquisition-prospects.json")
+  const api = await fetch(`${BASE}/api/acquisition`, { headers: { authorization: ACQ_AUTH } })
+  assert.equal(api.status, 200)
+  const body = (await api.json()) as {
+    autoSendEnabled: boolean
+    dailyLimit: number
+    prospects: { company: string; status: string; fitScore: number }[]
+  }
+  assert.equal(body.autoSendEnabled, false)
+  assert.equal(body.dailyLimit, 3)
+  const prospect = body.prospects.find((item) => item.company === "Dutch Recruit Test")!
+  assert.equal(prospect.status, "outreach_ready")
+  assert.equal(prospect.fitScore, 1)
+  assert.equal(rawDataFile("acquisition-prospects.json"), before, "GET /api/acquisition must be read-only")
+})
+
+test("client acquisition HTTP: external send fails closed when webhook policy is disabled", async () => {
+  const prospects = dataFile("acquisition-prospects.json") as { id: string; company: string; status: string }[]
+  const prospect = prospects.find((item) => item.company === "Dutch Recruit Test")!
+  const before = rawDataFile("acquisition-prospects.json")
+  const res = await fetch(`${BASE}/api/acquisition`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", authorization: ACQ_AUTH },
+    body: new URLSearchParams({ action: "send", id: prospect.id }),
+  })
+  assert.equal(res.status, 400)
+  assert.match(await res.text(), /ACQUISITION_AUTO_SEND is not enabled/)
+  assert.equal(rawDataFile("acquisition-prospects.json"), before, "failed send must not mutate the prospect")
+})
+
+test("client acquisition HTTP: unauthenticated public reads and writes are rejected", async () => {
+  const before = rawDataFile("acquisition-prospects.json")
+  const read = await fetch(`${BASE}/api/acquisition`)
+  assert.equal(read.status, 401)
+  assert.match(read.headers.get("www-authenticate") ?? "", /Basic/)
+  const write = await fetch(`${BASE}/api/acquisition`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ action: "register", company: "Injected" }),
+  })
+  assert.equal(write.status, 401)
+  assert.equal(rawDataFile("acquisition-prospects.json"), before, "unauthorized requests must not mutate acquisition state")
 })
 
 test("integrity guard: /admin renders the Pinocchio panel with all 5 producers healthy", async () => {

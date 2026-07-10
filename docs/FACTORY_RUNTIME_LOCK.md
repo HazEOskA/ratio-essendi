@@ -6,11 +6,19 @@ This document defines immutable constraints on how Factory Core v0.1 executes. T
 
 ## Hard Rules
 
-### 1. No Auto-Send
+### 1. No Auto-Send for Offers or Delivery
 
 `ApprovalItem.sent` is a TypeScript literal type `false`. It can never be set to `true` at runtime.  
 `WarehouseItem.sent` is also typed `false`.  
-No pipeline function, action handler, or server route may write to an external channel.
+No offer-pipeline or delivery route may write to an external channel.
+The separate Client Acquisition Loop has one bounded exception defined in
+FC-026: it may send a first-contact message through a configured HTTPS webhook
+only when the prospect carries public evidence and a verified business email,
+the daily 3-contact limit has not been reached, and the operator explicitly
+enabled `ACQUISITION_AUTO_SEND=true`.
+The Vercel preview cannot send acquisition outreach; persistent local/VPS
+runtime is required for durable deduplication and rate limits. Public
+acquisition routes require Basic Auth and fail closed without a password.
 
 ### 2. Operator Approval Required Before Any Offer Leaves the System
 
@@ -49,8 +57,8 @@ See docs/15 Decision 004.
 
 ## What Factory Core Is Not
 
-- Not a CRM
-- Not a mailing system
+- Not a general-purpose CRM
+- Not a bulk mailing system
 - Not a scheduler
 - Not a real-time event bus
 - Not a replacement for operator judgment
