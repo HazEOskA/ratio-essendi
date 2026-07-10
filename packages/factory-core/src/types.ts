@@ -263,6 +263,80 @@ export type CaseRecord = {
   followUpSuggestion: string
 }
 
+// --- Agent integrity (Pinocchio monitor + HRAR protocol) ---
+
+export type AgentIntegrityStatus = "healthy" | "watch" | "quarantined"
+
+export type AgentIntegrityRecord = {
+  agentId: MissionAgentId
+  noseLength: number
+  status: AgentIntegrityStatus
+  breaches: number
+  lastSignal?: string
+  updatedAt: string
+}
+
+// --- Production line (derived view over the current state) ---
+
+export type ProductionStationId =
+  | "intake" | "research" | "strategy" | "content" | "delivery" | "qa" | "packaging" | "operator_review"
+
+// Honest synchronous statuses — no fake "currently running".
+export type AgentStationStatus =
+  | "queued" | "completed" | "waiting_review" | "blocked" | "idle" | "skipped" | "ready_for_operator"
+
+export type ProductionTaskSource = "training" | "client" | "rework" | "delivery_pack"
+
+/** One task as it sits on the production floor right now. */
+export type AgentProductionTask = {
+  id: string
+  source: ProductionTaskSource
+  station: ProductionStationId
+  status: AgentStationStatus
+  agentId: AgentId
+  agentName: string
+  department?: DailyDigitalDepartment
+  title: string
+  inputSummary: string
+  outputSummary: string
+  outputId?: string
+  orderId?: string
+  clientName?: string
+  serviceName?: string
+  packId?: string
+  revisionCount?: number
+  qualityScore?: number
+  constraintsApplied?: string[]
+  nextStation?: ProductionStationId
+  nextOperatorAction: string
+}
+
+export type ProductionLineStation = {
+  id: ProductionStationId
+  name: string
+  agentId: AgentId
+  purpose: string
+  status: AgentStationStatus
+  lastTask?: AgentProductionTask
+  taskCount: number
+}
+
+export type ProductionLineView = {
+  generatedAt: string
+  mode: FactoryMode
+  autopilotEnabled: boolean
+  safeMode: true
+  trainingToday: string
+  activeClientOrders: number
+  deliveryPacks: { draft: number; approved: number; warehouseReady: number }
+  nextOperatorAction: string
+  stations: ProductionLineStation[]
+  trainingLine: AgentProductionTask[]
+  clientLine: AgentProductionTask[]
+  reworkLine: AgentProductionTask[]
+  deliveryPackLine: AgentProductionTask[]
+}
+
 // --- Autonomous cycle ---
 
 export type FactoryMode = "CLIENT_MODE" | "REWORK_MODE" | "NO_CLIENT_TRAINING_MODE" | "IDLE"
@@ -322,4 +396,5 @@ export type FactoryState = {
   workRuns: FactoryWorkRun[]
   deliveryPacks: DeliveryPack[]
   caseRecords: CaseRecord[]
+  integrity: AgentIntegrityRecord[]
 }

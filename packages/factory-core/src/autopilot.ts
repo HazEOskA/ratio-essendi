@@ -27,6 +27,7 @@ import type { FactoryStore } from "./store.js"
 import { produceOrderDeliverable } from "./orders.js"
 import { DEPT_AGENT, runDailyMissions, regenerateDigital } from "./missions.js"
 import { getAgent } from "./registry.js"
+import { isAgentQuarantined } from "./integrity.js"
 
 type StepInput = {
   agentId: AgentId
@@ -67,18 +68,18 @@ function completedStep(input: StepInput): AgentWorkStep {
 function nextOperatorAction(store: FactoryStore): string {
   const state = store.snapshot()
   const readyOrders = state.orders.filter((o) => o.status === "ready_for_review")
-  if (readyOrders.length > 0) return "Review client order"
+  if (readyOrders.length > 0) return "Przejrzyj zlecenie klienta"
 
   const reworks = state.dailyDigitals.filter((d) => d.status === "needs_rework")
-  if (reworks.length > 0) return "Wait for or run rework cycle"
+  if (reworks.length > 0) return "Poczekaj na cykl poprawek lub go uruchom"
 
   const trainingDrafts = state.dailyDigitals.filter((d) => !d.orderId && d.status === "draft_ready")
-  if (trainingDrafts.length > 0) return "Review training assets"
+  if (trainingDrafts.length > 0) return "Przejrzyj zasoby treningowe"
 
   const pendingApprovals = state.approvalQueue.filter((a) => a.status === "pending")
-  if (pendingApprovals.length > 0) return "Review pipeline approval item"
+  if (pendingApprovals.length > 0) return "Przejrzyj pozycję do zatwierdzenia w pipeline"
 
-  return "System is idle / no urgent action"
+  return "System jest bezczynny / brak pilnej akcji"
 }
 
 function idleReason(store: FactoryStore, date: string): string {
@@ -87,15 +88,15 @@ function idleReason(store: FactoryStore, date: string): string {
   const trainingDrafts = state.dailyDigitals.filter((d) => !d.orderId && d.status === "draft_ready").length
   const pendingApprovals = state.approvalQueue.filter((a) => a.status === "pending").length
   if (readyOrders + trainingDrafts + pendingApprovals > 0) {
-    return "Factory is waiting for operator review."
+    return "Fabryka czeka na przegląd operatora."
   }
 
   const todayTraining = state.dailyDigitals.filter((d) => !d.orderId && d.date === date).length
   if (todayTraining >= 5) {
-    return "No open client orders, no reworks, and today's training quota is already complete."
+    return "Brak otwartych zleceń klienta, brak poprawek, a dzienny limit treningu jest już wykonany."
   }
 
-  return "No open client orders, no reworks, and no runnable training job was created."
+  return "Brak otwartych zleceń klienta, brak poprawek i nie utworzono żadnego uruchamialnego zadania treningowego."
 }
 
 function directorInputSummary(store: FactoryStore, date: string): string {
@@ -104,7 +105,7 @@ function directorInputSummary(store: FactoryStore, date: string): string {
   const readyOrders = state.orders.filter((o) => o.status === "ready_for_review").length
   const reworks = state.dailyDigitals.filter((d) => d.status === "needs_rework").length
   const trainingToday = state.dailyDigitals.filter((d) => !d.orderId && d.date === date).length
-  return `open orders=${openOrders}; ready orders=${readyOrders}; needs_rework=${reworks}; training today=${trainingToday}/5`
+  return `otwarte zlecenia=${openOrders}; gotowe do przeglądu=${readyOrders}; wymaga poprawek=${reworks}; trening dziś=${trainingToday}/5`
 }
 
 export async function runAutonomousCycle(
@@ -126,10 +127,24 @@ export async function runAutonomousCycle(
   try {
     // 1. Client work first — real orders always beat training. If an order's
     // existing deliverable is marked needs_rework, the rework stage handles it.
-    const openOrders = store.getOpenOrders().filter((order) => {
+    const runnable = store.getOpenOrders().filter((order) => {
       const existing = order.deliverableId ? store.getDailyDigital(order.deliverableId) : undefined
       return existing?.status !== "needs_rework"
     })
+    // HRAR quarantine: a quarantined producer may keep training, but is cut
+    // off from client production until the operator resets it (God Layer).
+    const integrityBlocked = runnable.filter((order) => isAgentQuarantined(store, DEPT_AGENT[order.department]))
+    const openOrders = runnable.filter((order) => !isAgentQuarantined(store, DEPT_AGENT[order.department]))
+    for (const order of integrityBlocked) {
+      steps.push(completedStep({
+        agentId: DEPT_AGENT[order.department],
+        department: order.department,
+        jobType: "client_order_production",
+        status: "skipped",
+        inputSummary: `${order.id} for ${order.clientName}: ${short(order.description)}`,
+        outputSummary: `BLOCKED by integrity guard: ${DEPT_AGENT[order.department]} is quarantined (HRAR). Training allowed; client production halted until operator reset.`,
+      }))
+    }
     ordersProduced = []
     for (const order of openOrders) {
       const stepStartedAt = new Date().toISOString()
@@ -277,7 +292,7 @@ export async function runAutonomousCycle(
       steps,
       outputsCreated,
       idleReason: `Cycle failed: ${message}`,
-      nextOperatorAction: "Inspect failed factory cycle",
+      nextOperatorAction: "Sprawdź nieudany cykl fabryki",
     })
     throw err
   }

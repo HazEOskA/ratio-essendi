@@ -16,6 +16,8 @@ import type {
   FactoryWorkRun,
   DeliveryPack,
   CaseRecord,
+  AgentIntegrityRecord,
+  MissionAgentId,
 } from "./types.js"
 
 export class JsonStore<T> {
@@ -68,6 +70,7 @@ export class FactoryStore {
   readonly #workRuns: JsonStore<FactoryWorkRun[]>
   readonly #deliveryPacks: JsonStore<DeliveryPack[]>
   readonly #caseRecords: JsonStore<CaseRecord[]>
+  readonly #integrity: JsonStore<AgentIntegrityRecord[]>
 
   constructor(dataDir: string) {
     const p = (name: string) => join(dataDir, `${name}.json`)
@@ -85,6 +88,7 @@ export class FactoryStore {
     this.#workRuns = new JsonStore(p("work-runs"), [])
     this.#deliveryPacks = new JsonStore(p("delivery-packs"), [])
     this.#caseRecords = new JsonStore(p("case-records"), [])
+    this.#integrity = new JsonStore(p("integrity"), [])
   }
 
   snapshot(): FactoryState {
@@ -102,6 +106,7 @@ export class FactoryStore {
       workRuns: this.#workRuns.read(),
       deliveryPacks: this.#deliveryPacks.read(),
       caseRecords: this.#caseRecords.read(),
+      integrity: this.#integrity.read(),
     }
   }
 
@@ -209,6 +214,20 @@ export class FactoryStore {
 
   addCaseRecord(c: CaseRecord): void {
     this.#caseRecords.update((arr) => [...arr, c])
+  }
+
+  // --- Agent integrity (Pinocchio monitor) ---
+
+  getIntegrityRecord(agentId: MissionAgentId): AgentIntegrityRecord | undefined {
+    return this.#integrity.read().find((r) => r.agentId === agentId)
+  }
+
+  upsertIntegrityRecord(rec: AgentIntegrityRecord): void {
+    this.#integrity.update((arr) => {
+      const idx = arr.findIndex((r) => r.agentId === rec.agentId)
+      if (idx === -1) return [...arr, rec]
+      return arr.map((r, i) => (i === idx ? rec : r))
+    })
   }
 
   // --- Settings (survive restarts) ---

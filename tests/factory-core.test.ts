@@ -30,6 +30,11 @@ import {
   SERVICE_CATALOG,
   getServiceDefinition,
   isValidServiceId,
+  getIntegrityRecords,
+  isAgentQuarantined,
+  resetAgentIntegrity,
+  INTEGRITY_LIMITS,
+  deriveProductionLine,
   createDeliveryPack,
   approveDeliveryPack,
   warehouseDeliveryPack,
@@ -552,7 +557,7 @@ test("autonomous cycle: open order → CLIENT_MODE, deliverable produced, no tra
     assert.equal(run.mode, "CLIENT_MODE")
     assert.equal(run.status, "completed")
     assert.equal(run.trigger, "manual")
-    assert.equal(run.nextOperatorAction, "Review client order")
+    assert.equal(run.nextOperatorAction, "Przejrzyj zlecenie klienta")
     assert.ok(run.outputsCreated.some((id) => id.startsWith("dd-order-")))
     assert.ok(
       run.steps.some((s) => s.agentId === "DA" && s.jobType === "client_order_production" && s.outputId),
@@ -598,7 +603,7 @@ test("autonomous cycle: second run same day is IDLE (bounded, no queue spam)", a
     assert.equal(store.snapshot().workRuns.length, 2, "idle cycles are still recorded")
     const idleRun = store.getLastWorkRun()!
     assert.equal(idleRun.mode, "IDLE")
-    assert.match(idleRun.idleReason ?? "", /Factory is waiting for operator review|training quota/)
+    assert.match(idleRun.idleReason ?? "", /Fabryka czeka na przegląd operatora|limit treningu/)
     assert.equal(idleRun.outputsCreated.length, 0)
   } finally {
     cleanup()
@@ -815,6 +820,162 @@ test("service order rework keeps the service shape and applies feedback", () => 
     assert.ok(regenerated.content.includes("Workflow Diagnosis"), "rework must not degrade to a generic template")
     assert.ok(regenerated.content.includes("PRODUCTION CONSTRAINTS"))
     assert.ok(regenerated.content.includes("10-person install team"))
+  } finally {
+    cleanup()
+  }
+})
+
+
+// 9. Integrity guard (Pinocchio + HRAR) — factory integration
+
+test("integrity: operator rejections grow the nose; 4 rejections quarantine the agent (HRAR)", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    // 4 delivery-dept training assets across 4 days, each rejected by the operator
+    for (const date of ["2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04"]) {
+      const digitals = await runDailyMissions(store, date)
+      const deliveryAsset = digitals.find((d) => d.department === "delivery")!
+      rejectDigital(store, deliveryAsset.id, "not good enough")
+    }
+    const rec = store.getIntegrityRecord("DA")!
+    assert.equal(rec.status, "quarantined", `expected quarantine, nose=${rec.noseLength}`)
+    assert.equal(rec.noseLength, 100)
+    assert.equal(rec.breaches, 1)
+    assert.ok(isAgentQuarantined(store, "DA"))
+    // HRAR event is in the log, operational wording, no metaphysics
+    const ev = store.snapshot().events.find((e) => e.eventType === "integrity.quarantine")
+    assert.ok(ev, "integrity.quarantine event must be logged")
+    assert.ok(ev!.detail.includes("quarantined from client production"))
+    assert.ok(ev!.detail.includes("Operator reset (with reason) required"))
+  } finally {
+    cleanup()
+  }
+})
+
+test("integrity: quarantined agent is cut off from client production but may keep training", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    for (const date of ["2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04"]) {
+      const digitals = await runDailyMissions(store, date)
+      rejectDigital(store, digitals.find((d) => d.department === "delivery")!.id, "reject")
+    }
+    assert.ok(isAgentQuarantined(store, "DA"))
+
+    // A client order routed to the quarantined department must NOT produce
+    const order = createOrder(store, {
+      clientName: "BlockedCo",
+      department: "delivery",
+      description: "demo script for onboarding",
+    })
+    const result = await runAutonomousCycle(store, "2026-07-05")
+    assert.equal(result.ordersProduced.length, 0, "quarantined dept must not produce for clients")
+    assert.equal(store.getOrder(order.id)!.deliverableId, undefined)
+    // The skip is visible as a work-run step, honestly labelled
+    const run = store.getLastWorkRun()!
+    const blockedStep = run.steps.find((st) => st.jobType === "client_order_production" && st.status === "skipped")
+    assert.ok(blockedStep, "blocked production must appear as a skipped step")
+    assert.ok(blockedStep!.outputSummary!.includes("BLOCKED by integrity guard"))
+
+    // Training-yard rule: the same cycle still created 5 training assets, incl. delivery
+    const training = store.getDailyDigitalsForDate("2026-07-05").filter((d) => !d.orderId)
+    assert.equal(training.length, 5, "training must keep running for a quarantined agent")
+    assert.ok(training.some((d) => d.department === "delivery"))
+  } finally {
+    cleanup()
+  }
+})
+
+test("integrity: operator reset (God Layer) re-enables client production", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    for (const date of ["2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04"]) {
+      const digitals = await runDailyMissions(store, date)
+      rejectDigital(store, digitals.find((d) => d.department === "delivery")!.id, "reject")
+    }
+    const order = createOrder(store, {
+      clientName: "RevivedCo",
+      department: "delivery",
+      description: "demo script",
+    })
+    await runAutonomousCycle(store, "2026-07-05")
+    assert.equal(store.getOrder(order.id)!.deliverableId, undefined, "blocked while quarantined")
+
+    const updated = resetAgentIntegrity(store, "DA", "retrained", "swapped the weak template")
+    assert.ok(updated)
+    assert.equal(updated!.status, "healthy")
+    assert.equal(updated!.noseLength, 0)
+    assert.equal(updated!.breaches, 1, "breach history is preserved across resets")
+    const resetEvent = store.snapshot().events.find((e) => e.eventType === "integrity.reset")
+    assert.ok(resetEvent)
+    assert.ok(resetEvent!.detail.includes("Reason: retrained"))
+    assert.ok(resetEvent!.detail.includes("Note: swapped the weak template"))
+    assert.ok(resetEvent!.detail.includes("Breach history preserved (1 total)"))
+    assert.ok(resetEvent!.detail.includes("God Layer"))
+
+    const result = await runAutonomousCycle(store, "2026-07-05")
+    assert.equal(result.ordersProduced.length, 1, "production must resume after reset")
+    assert.ok(store.getOrder(order.id)!.deliverableId)
+  } finally {
+    cleanup()
+  }
+})
+
+test("integrity: resetAgentIntegrity is a no-op (undefined) on an already-healthy agent", () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    const result = resetAgentIntegrity(store, "MA", "operator_override")
+    assert.equal(result, undefined, "nothing to reset when nose is already 0 / healthy")
+  } finally {
+    cleanup()
+  }
+})
+
+test("integrity: acceptance shrinks the nose; watch status at 40+", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    // 2 rejections on marketing = nose 50 → watch
+    for (const date of ["2026-07-01", "2026-07-02"]) {
+      const digitals = await runDailyMissions(store, date)
+      rejectDigital(store, digitals.find((d) => d.department === "marketing")!.id, "reject")
+    }
+    let rec = store.getIntegrityRecord("MA")!
+    assert.equal(rec.noseLength, 2 * INTEGRITY_LIMITS.growRejected)
+    assert.equal(rec.status, "watch")
+
+    // Accepting good work heals: 50 → 40 → 30 (healthy below 40)
+    const day3 = await runDailyMissions(store, "2026-07-03")
+    acceptDigital(store, day3.find((d) => d.department === "marketing")!.id)
+    rec = store.getIntegrityRecord("MA")!
+    assert.equal(rec.noseLength, 40)
+    const day4 = await runDailyMissions(store, "2026-07-04")
+    acceptDigital(store, day4.find((d) => d.department === "marketing")!.id)
+    rec = store.getIntegrityRecord("MA")!
+    assert.equal(rec.noseLength, 30)
+    assert.equal(rec.status, "healthy")
+  } finally {
+    cleanup()
+  }
+})
+
+test("integrity: quarantined producer's station reads blocked on the production line", async () => {
+  const { store, cleanup } = tmpStore()
+  try {
+    for (const date of ["2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04"]) {
+      const digitals = await runDailyMissions(store, date)
+      rejectDigital(store, digitals.find((d) => d.department === "delivery")!.id, "reject")
+    }
+    const pl = deriveProductionLine(store.snapshot(), {
+      mode: "IDLE",
+      autopilotEnabled: true,
+      nextOperatorAction: "test",
+      trainingToday: "5/5",
+    })
+    const deliveryStation = pl.stations.find((st) => st.id === "delivery")!
+    assert.equal(deliveryStation.status, "blocked", "quarantined DA station must read blocked")
+    // getIntegrityRecords always returns all 5 producers (default healthy)
+    const records = getIntegrityRecords(store)
+    assert.equal(records.length, 5)
+    assert.equal(records.filter((r) => r.status === "quarantined").length, 1)
   } finally {
     cleanup()
   }

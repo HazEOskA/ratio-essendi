@@ -35,6 +35,14 @@ export type {
   DeliveryPack,
   DeliveryPackStatus,
   CaseRecord,
+  ProductionStationId,
+  AgentStationStatus,
+  ProductionTaskSource,
+  AgentProductionTask,
+  ProductionLineStation,
+  ProductionLineView,
+  AgentIntegrityRecord,
+  AgentIntegrityStatus,
 } from "./types.js"
 
 export { JsonStore, FactoryStore } from "./store.js"
@@ -57,3 +65,16 @@ export type { OrderInput } from "./orders.js"
 export { runAutonomousCycle } from "./autopilot.js"
 export { SERVICE_CATALOG, getServiceDefinition, isValidServiceId, buildServiceContent } from "./services.js"
 export { createDeliveryPack, approveDeliveryPack, warehouseDeliveryPack, renderPackMarkdown } from "./packs.js"
+export { deriveProductionLine, PRODUCTION_STATIONS } from "./production-line.js"
+export {
+  getIntegrityRecords,
+  isAgentQuarantined,
+  resetAgentIntegrity,
+  recordOperatorIntegritySignal,
+  recordQualityIntegritySignal,
+  isValidResetReason,
+  INTEGRITY_LIMITS,
+  INTEGRITY_RESET_REASONS,
+  PRODUCER_AGENTS,
+} from "./integrity.js"
+export type { IntegrityResetReason } from "./integrity.js"
