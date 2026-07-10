@@ -7,11 +7,16 @@
  * itself but treats node_modules as plain JS and never ships those .ts files,
  * so an unbundled function crashes at runtime with ERR_MODULE_NOT_FOUND.
  *
- * Runs locally via `npm run build:vercel` (the bundle is committed) AND on
- * Vercel as the buildCommand, so a deploy always regenerates it from the
- * sources being deployed — a stale committed bundle cannot ship.
+ * The Vercel project is also configured with `public` as its static output
+ * directory. This repository is function-first, but the directory still has
+ * to exist after the build or Vercel rejects the deployment before packaging
+ * the serverless function.
  */
+import { mkdir, writeFile } from "node:fs/promises"
 import { build } from "esbuild"
+
+await mkdir("public", { recursive: true })
+await writeFile("public/.vercel-output", "Ratio Essendi serverless preview\n", "utf8")
 
 const result = await build({
   entryPoints: ["scripts/vercel-entry.ts"],
