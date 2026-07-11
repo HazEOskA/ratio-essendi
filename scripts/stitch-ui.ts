@@ -1,7 +1,9 @@
 import { STITCH_CSS } from "./stitch-ui-styles.js"
-import { STITCH_CLIENT } from "./stitch-ui-client.js"
+import { STITCH_REFINEMENT_CSS } from "./stitch-ui-refinement.js"
+import { STITCH_CLIENT_V2 } from "./stitch-ui-client-v2.js"
 
 type RequestLike = { url?: string; method?: string }
+type Screen = "command" | "lead" | "operator"
 
 const UI_ROUTES = new Set(["/", "/admin", "/operator", "/lead-engine"])
 
@@ -22,13 +24,13 @@ export function shouldRenderStitchUi(req: RequestLike): boolean {
   return !legacy && UI_ROUTES.has(path)
 }
 
-function screenFor(path: string): "command" | "lead" | "operator" {
+function screenFor(path: string): Screen {
   if (path === "/lead-engine") return "lead"
   if (path === "/operator") return "operator"
   return "command"
 }
 
-const nav = (active: string) => [
+const nav = (active: string): string => [
   ["/admin", "dashboard", "Command", "command"],
   ["/lead-engine", "psychology", "Intelligence", "lead"],
   ["/production-line", "conveyor_belt", "Logistics", "logistics"],
@@ -36,9 +38,32 @@ const nav = (active: string) => [
   ["/operator", "settings_input_component", "System", "operator"],
 ].map(([href, icon, label, key]) => `<a href="${href}" class="nav-link ${active === key ? "active" : ""}"><span class="material-symbols-outlined">${icon}</span><span>${label}</span></a>`).join("")
 
+function sidebarHeader(screen: Screen): string {
+  if (screen === "lead") {
+    return `<div class="side-brand-block"><div class="stamp">SYSTEM IDENTIFIER</div><div class="side-wordmark">RATIO ESSENDI</div></div>`
+  }
+  if (screen === "operator") {
+    return `<div class="side-brand-block"><div class="stamp">RATIO ESSENDI</div>${operatorCard()}</div>`
+  }
+  return `<div class="identity"><div class="stamp">SYSTEM IDENT</div>${operatorCard()}</div>`
+}
+
+function operatorCard(): string {
+  return `<div class="operator"><div class="operator-icon"><span class="material-symbols-outlined">shield_person</span></div><div><strong>OPERATOR-01</strong><small>● STATUS: OPERATIONAL</small></div></div>`
+}
+
+function desktopTopbar(screen: Screen, path: string): string {
+  const brand = screen === "lead" ? "LEAD<br>ENGINE" : "RATIO<br>ESSENDI"
+  const commandMeta = `<div class="command-meta"><span>Mode:<b id="shell-mode">Syncing</b></span><span>Status:<b class="cyan">Operational</b></span><span>Operator:<b>God-Boss</b></span></div>`
+  const tabs = `<nav class="topnav"><a class="active" href="${path}">Dashboard</a><a href="/factory-run">Missions</a><a href="/warehouse">Inventory</a><a href="/production-line">Agents</a><a href="/events">Logs</a></nav>`
+  return `<header class="topbar"><div class="brand">${brand}</div>${screen === "command" ? commandMeta : tabs}<div class="top-actions"><a class="shell-icon" href="/events" aria-label="Open logs"><span class="material-symbols-outlined">terminal</span></a><button class="shell-icon" data-action="notify" aria-label="Notifications"><span class="material-symbols-outlined">notifications_active</span><i></i></button><a class="shell-icon" href="/operator" aria-label="System settings"><span class="material-symbols-outlined">settings</span></a><span class="top-divider"></span>${screen === "command" ? "" : '<a class="button" href="/events">DIAGNOSTICS</a>'}<button class="button primary" data-action="start">START OPERATION</button></div></header>`
+}
+
 export function renderStitchUi(req: RequestLike): string {
   const { path } = resolveRequestPath(req)
   const screen = screenFor(path)
   const active = screen === "lead" ? "lead" : screen === "operator" ? "operator" : "command"
-  return `<!doctype html><html lang="pl" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>RATIO ESSENDI</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet"><style>${STITCH_CSS}</style></head><body data-screen="${screen}"><aside class="sidebar"><div class="identity"><div class="stamp">SYSTEM IDENTIFIER</div><div class="operator"><div class="operator-icon"><span class="material-symbols-outlined">shield_person</span></div><div><strong>OPERATOR-01</strong><small>● STATUS: OPERATIONAL</small></div></div></div><nav class="nav">${nav(active)}</nav><div class="side-bottom"><a class="button primary block" href="/factory-run">DEPLOY AGENT</a><div style="height:20px"></div><a class="nav-link" href="/events"><span class="material-symbols-outlined">terminal</span>Logs</a><a class="nav-link" href="/admin?legacy=1"><span class="material-symbols-outlined">help</span>Legacy tools</a></div></aside><main class="shell"><header class="mobile-top"><div class="brand">RATIO ESSENDI</div><div class="top-actions"><button class="icon-button" data-action="notify"><span class="material-symbols-outlined">notifications_active</span></button><a class="operator-icon" href="/operator"><span class="material-symbols-outlined">account_circle</span></a></div></header><header class="topbar"><div class="brand">${screen === "lead" ? "LEAD<br>ENGINE" : "RATIO<br>ESSENDI"}</div><nav class="topnav"><a class="active" href="${path}">Dashboard</a><a href="/factory-run">Missions</a><a href="/warehouse">Inventory</a><a href="/production-line">Agents</a><a href="/events">Logs</a></nav><div class="top-actions"><a class="button" href="/events">DIAGNOSTICS</a><button class="button primary" data-action="start">START OPERATION</button></div></header><div class="content" id="app"><div class="terminal">LOADING RATIO ESSENDI STATE...</div></div><button class="mobile-fab" data-action="start"><span class="material-symbols-outlined" style="font-size:34px">rocket_launch</span></button><nav class="mobile-bottom"><a href="/admin" class="${active === "command" ? "active" : ""}"><span class="material-symbols-outlined">dashboard</span>COMMAND</a><a href="/lead-engine" class="${active === "lead" ? "active" : ""}"><span class="material-symbols-outlined">psychology</span>INTEL</a><a href="/production-line"><span class="material-symbols-outlined">conveyor_belt</span>LOGISTICS</a><a href="/orders"><span class="material-symbols-outlined">group</span>PERSONNEL</a><a href="/operator" class="${active === "operator" ? "active" : ""}"><span class="material-symbols-outlined">tune</span>SYSTEM</a></nav></main><div class="modal" id="modal"><div class="modal-card" id="modal-card"></div></div><div class="toast" id="toast"></div><script>${STITCH_CLIENT}</script></body></html>`
+  const bottomOperator = screen === "lead" ? `<div class="sidebar-operator-bottom">${operatorCard()}</div>` : ""
+
+  return `<!doctype html><html lang="pl" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>RATIO ESSENDI</title><meta name="theme-color" content="#0a0a0a"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet"><style>${STITCH_CSS}${STITCH_REFINEMENT_CSS}</style></head><body data-screen="${screen}"><aside class="sidebar">${sidebarHeader(screen)}<nav class="nav">${nav(active)}</nav><div class="side-bottom">${bottomOperator}<a class="button primary block" href="/factory-run">DEPLOY AGENT</a><div class="side-utility"><a class="nav-link" href="/events"><span class="material-symbols-outlined">terminal</span>Logs</a><a class="nav-link" href="${path}?legacy=1"><span class="material-symbols-outlined">help</span>Legacy tools</a></div></div></aside><main class="shell"><header class="mobile-top"><div class="mobile-wordmark"><span class="material-symbols-outlined">terminal</span><strong>RATIO</strong> ESSENDI</div><div class="top-actions"><button class="icon-button" data-action="notify" aria-label="Notifications"><span class="material-symbols-outlined">notifications_active</span><i></i></button><a class="mobile-avatar" href="/operator" aria-label="Operator cockpit"><span class="material-symbols-outlined">account_circle</span></a></div></header>${desktopTopbar(screen, path)}<div class="content" id="app"><div class="terminal">LOADING RATIO ESSENDI STATE...</div></div><button class="mobile-fab" data-action="start" aria-label="Start operation"><span class="material-symbols-outlined">rocket_launch</span></button><nav class="mobile-bottom"><a href="/admin" class="${active === "command" ? "active" : ""}"><span class="material-symbols-outlined">dashboard</span>COMMAND</a><a href="/lead-engine" class="${active === "lead" ? "active" : ""}"><span class="material-symbols-outlined">psychology</span>INTEL</a><a href="/production-line"><span class="material-symbols-outlined">conveyor_belt</span>LOGISTICS</a><a href="/orders"><span class="material-symbols-outlined">group</span>PERSONNEL</a><a href="/operator" class="${active === "operator" ? "active" : ""}"><span class="material-symbols-outlined">tune</span>SYSTEM</a></nav></main><div class="modal" id="modal" aria-hidden="true"><div class="modal-card" id="modal-card" role="dialog" aria-modal="true"></div></div><div class="toast" id="toast" role="status"></div><script>${STITCH_CLIENT_V2}</script></body></html>`
 }
