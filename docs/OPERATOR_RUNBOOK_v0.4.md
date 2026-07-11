@@ -184,6 +184,52 @@ Nothing here sends anything anywhere; the guard only restricts what the
 factory may produce until you decide otherwise, and every decision — quarantine
 or reset — is a reason-bearing event in the log.
 
+## 11c. Lead Engine — LEA (`/lead-engine`)
+
+LEA is your Growth Director: it qualifies leads and writes the replies — **you
+send them.** The factory has no channel to any lead. Every draft stays inside
+the thread until you copy it out and send it yourself (mail, LinkedIn, phone —
+your choice, your account, your click).
+
+**Start a thread:** open `/lead-engine`, fill in the lead's name (company and
+source optional), submit. The thread starts `cold` with an empty qualification.
+
+**Work the loop:**
+1. A lead writes to you (outside the factory). **Paste their message** into the
+   thread's "new message from lead" form.
+2. The factory re-computes qualification from the lead's own words only —
+   problem, budget, decision-maker — and moves status mechanically:
+   `cold` → `warm` (1 field known) → `hot` (2) → `qualified` (all 3).
+3. LEA immediately drafts a reply: 2–4 sentences, no bot phrases, quoting the
+   lead's own stated pain back at them, ending with one precise question that
+   targets the next unknown field.
+4. Read the draft. If it's wrong, **redraft with feedback** — your note is a
+   hard constraint on the next version, and the revision counter climbs so you
+   can see how many passes it took.
+5. When you actually send a reply through your own channel, paste what you sent
+   into **"mark as sent"**. This is bookkeeping only — it feeds LEA's context
+   for the next draft. The event log will say it plainly: the factory sent
+   nothing.
+
+**Proposal:** once a lead is worth it, click "draft proposal". LEA writes a
+structured business proposal *into the thread* — sections, pricing framing,
+next steps. It is never emailed, exported, or delivered by the factory; you
+take it from the thread like any other draft.
+
+**Close:** `won` and `lost` are yours alone — no qualification math ever sets
+them, and once set they stick until you change them.
+
+**Which brain wrote the draft:** each draft is tagged `anthropic` (live Claude)
+or `stub` (offline template); the panel shows which one the next draft will
+use. Qualification does not care — it is deterministic regex over the lead's
+words, so status behaves identically in both modes. If a live call fails, the
+stub takes over automatically rather than blocking your cockpit.
+
+Everything is visible in `/admin` under "Silnik Leadów — LEA" and read-only at
+`GET /api/admin/state` under `leadEngine`. Every action — thread created,
+message received, field qualified, status changed, draft written, redraft,
+proposal, mark-as-sent — is an event in the log with agent id `LEA`.
+
 ## 12. Definition of done for a client run
 
 1. Order exists with a service and honest brief

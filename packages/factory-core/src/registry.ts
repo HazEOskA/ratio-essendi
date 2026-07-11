@@ -153,6 +153,14 @@ export const AGENT_REGISTRY: AgentDefinition[] = [
     trigger: "open order (dept=qa), missing qa training asset for today, or revision job pending",
     nextAction: "Generate qa_asset / regenerate flagged assets with feedback → daily_review",
   },
+  {
+    id: "LEA",
+    name: "Dyrektor Wzrostu (Lead Engine)",
+    role: "lead-engine",
+    watch: "Lead threads: incoming lead messages + qualification gaps (problem/budżet/decydent)",
+    trigger: "new lead message recorded, operator redraft request, or proposal request",
+    nextAction: "Draft persona-styled reply/proposal → operator reviews, edits, and sends manually",
+  },
 ]
 
 export function getAgent(id: AgentId): AgentDefinition {

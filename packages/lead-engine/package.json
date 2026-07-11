@@ -1,0 +1,16 @@
+{
+  "name": "@ratio-essendi/lead-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lead Engine (LEA) — Dyrektor Wzrostu: drafts qualification-driven sales replies for the operator to send manually. Claude-powered when ANTHROPIC_API_KEY is set, deterministic stub otherwise.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.106.0"
+  },
+  "license": "UNLICENSED"
+}

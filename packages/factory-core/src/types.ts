@@ -2,6 +2,7 @@
 export type AgentId =
   | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N"
   | "MA" | "SA" | "DA" | "RA" | "QAA"
+  | "LEA"
 
 export type MissionAgentId = "MA" | "SA" | "DA" | "RA" | "QAA"
 
@@ -276,6 +277,48 @@ export type AgentIntegrityRecord = {
   updatedAt: string
 }
 
+
+// --- Lead Engine (LEA) — wątki leadów i szkice odpowiedzi ---
+//
+// LEA redaguje, operator wysyła. Wiadomość "operator_sent" to ZAPIS tego, co
+// operator wysłał własnym kanałem — fabryka sama nie wysyła niczego (FC-021).
+
+export type LeadThreadStatus = "cold" | "warm" | "hot" | "qualified" | "won" | "lost"
+
+export type LeadThreadMessageAuthor = "lead" | "lea_draft" | "operator_sent"
+
+export type LeadThreadMessage = {
+  id: string
+  author: LeadThreadMessageAuthor
+  kind: "message" | "reply" | "proposal"
+  text: string
+  at: string
+  /** Dla szkiców LEA: który mózg je wygenerował. */
+  draftMode?: "anthropic" | "stub"
+  /** Dla szkiców LEA: cel kwalifikacyjny tej wiadomości. */
+  objective?: string
+}
+
+export type LeadThreadQualification = {
+  problem?: string
+  budget?: string
+  decisionMaker?: string
+}
+
+export type LeadThread = {
+  id: string
+  leadName: string
+  company?: string
+  source?: string
+  status: LeadThreadStatus
+  qualification: LeadThreadQualification
+  messages: LeadThreadMessage[]
+  /** Ile razy operator kazał przeredagować bieżący szkic. */
+  draftRevision: number
+  createdAt: string
+  updatedAt: string
+}
+
 // --- Production line (derived view over the current state) ---
 
 export type ProductionStationId =
@@ -397,4 +440,5 @@ export type FactoryState = {
   deliveryPacks: DeliveryPack[]
   caseRecords: CaseRecord[]
   integrity: AgentIntegrityRecord[]
+  leadThreads: LeadThread[]
 }

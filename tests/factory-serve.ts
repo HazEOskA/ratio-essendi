@@ -42,6 +42,16 @@ import {
   INTEGRITY_LIMITS,
   INTEGRITY_RESET_REASONS,
   PRODUCER_AGENTS,
+  createLeadThread,
+  recordIncomingLeadMessage,
+  redraftLeadReply,
+  draftLeadProposal,
+  markLeadReplySent,
+  setLeadThreadStatus,
+  pendingDraftFor,
+  isValidLeadThreadStatus,
+  leadDrafterMode,
+  LEAD_THREAD_STATUSES,
 } from "@ratio-essendi/factory-core"
 import type {
   FactoryState,
@@ -57,6 +67,8 @@ import type {
   ProductionLineView,
   AgentProductionTask,
   AgentStationStatus,
+  LeadThread,
+  LeadThreadMessage,
 } from "@ratio-essendi/factory-core"
 import { randomUUID } from "node:crypto"
 
@@ -153,6 +165,12 @@ const STATUS_LABELS: Record<string, string> = {
   "pack draft": "szkic pakietu",
   "pack approved": "pakiet zatwierdzony",
   failed: "nieudane",
+  cold: "zimny",
+  warm: "ciepły",
+  hot: "gorący",
+  qualified: "zakwalifikowany",
+  won: "wygrany",
+  lost: "przegrany",
 }
 const statusLabel = (s: string): string => STATUS_LABELS[s] ?? s
 
@@ -191,6 +209,7 @@ const nav = (active: string): string => {
     ["/", "Fabryka"],
     ["/factory-run", "Start Dnia"],
     ["/production-line", "Linia Produkcyjna"],
+    ["/lead-engine", "Silnik Leadów"],
     ["/orders", "Zlecenia"],
     ["/delivery", "Dostawy"],
     ["/leads", "Leady"],
@@ -1287,6 +1306,16 @@ function renderAdmin(state: FactoryState, flash?: string): string {
   </section>
 
   <section class="admin-panel">
+    <h2>Silnik Leadów — LEA (Dyrektor Wzrostu)</h2>
+    <p class="dim" style="font-size:12px;margin-bottom:8px">LEA kwalifikuje leady (problem → budżet → decydent) i redaguje odpowiedzi w personie Dyrektora Wzrostu. Wysyłasz zawsze Ty. Pełny widok: <a href="/lead-engine" style="color:#58a6ff">/lead-engine</a></p>
+    <div class="admin-three">
+      <div class="stat"><div class="v info">${state.leadThreads.length}</div><div class="l">Wątki leadów</div></div>
+      <div class="stat"><div class="v ${state.leadThreads.filter((t) => pendingDraftFor(t) !== undefined).length ? "warn" : "ok"}">${state.leadThreads.filter((t) => pendingDraftFor(t) !== undefined).length}</div><div class="l">Szkice do wysłania</div></div>
+      <div class="stat"><div class="v ok">${state.leadThreads.filter((t) => t.status === "qualified" || t.status === "won").length}</div><div class="l">Zakwalifikowane / wygrane</div></div>
+    </div>
+  </section>
+
+  <section class="admin-panel">
     <h2>Linia Produkcyjna Agentów</h2>
     <p class="dim" style="font-size:12px;margin-bottom:8px">Skrócony widok hali produkcyjnej. Pełny widok: <a href="/production-line" style="color:#58a6ff">/production-line</a></p>
     ${(() => { const pl = productionLineFor(state); return `
@@ -1815,6 +1844,141 @@ ${state.workRuns.length === 0 ? '<p class="dim">Brak zarejestrowanych przebiegó
 </details>`).join("")}`)
 }
 
+function leadStatusBadgeCls(st: LeadThread["status"]): string {
+  if (st === "won") return "ok"
+  if (st === "lost") return "bad"
+  if (st === "qualified" || st === "hot") return "warn"
+  if (st === "warm") return "info"
+  return "muted"
+}
+
+function renderLeadMessage(m: LeadThreadMessage): string {
+  const who = m.author === "lead"
+    ? badge("LEAD", "warn")
+    : m.author === "operator_sent"
+      ? badge("WYSŁANE (Ty)", "ok")
+      : badge(m.kind === "proposal" ? "SZKIC OFERTY (LEA)" : "SZKIC (LEA)", "info")
+  const meta = m.author === "lea_draft"
+    ? `<span class="dim" style="font-size:10.5px"> mózg: ${E(m.draftMode === "anthropic" ? "Claude (live)" : "szablon (offline)")}${m.objective ? ` · cel: ${E(m.objective)}` : ""}</span>`
+    : ""
+  return `
+<div class="pl-task ${m.author === "lead" ? "waiting_review" : m.author === "operator_sent" ? "completed" : "ready_for_operator"}">
+  <div class="daily-header">${who}<span class="dim mono" style="font-size:10.5px">${E(m.at.slice(0, 16).replace("T", " "))}</span>${meta}</div>
+  <div class="daily-content" style="max-height:220px">${E(m.text)}</div>
+</div>`
+}
+
+function renderLeadEngine(state: FactoryState, flash?: string): string {
+  const flashHtml = flash ? `<div class="flash ${flash.startsWith("Błąd") ? "bad" : ""}">${E(flash)}</div>` : ""
+  const threads = [...state.leadThreads].reverse()
+  const active = state.leadThreads.filter((t) => t.status !== "won" && t.status !== "lost")
+  const awaiting = state.leadThreads.filter((t) => pendingDraftFor(t) !== undefined)
+  const qualified = state.leadThreads.filter((t) => t.status === "qualified" || t.status === "won")
+  const mode = leadDrafterMode()
+  const inputStyle = "background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font:13px ui-sans-serif,sans-serif;padding:6px 10px"
+
+  const qualChip = (label: string, value?: string): string =>
+    value
+      ? `<span class="badge ok" title="${E(value)}">${E(label)} ✓</span>`
+      : `<span class="badge muted">${E(label)} —</span>`
+
+  const renderThread = (t: LeadThread): string => {
+    const draft = pendingDraftFor(t)
+    const closed = t.status === "won" || t.status === "lost"
+    return `
+<div class="admin-order ${t.status === "won" ? "done" : t.status === "lost" ? "bad" : draft ? "ready" : ""}" id="lead-${E(t.id)}">
+  <div class="daily-header">
+    ${badge(statusLabel(t.status), leadStatusBadgeCls(t.status))}
+    <span class="daily-title">${E(t.leadName)}</span>
+    ${t.company ? `<span class="dim" style="font-size:12px">${E(t.company)}</span>` : ""}
+    ${t.source ? `<span class="dim" style="font-size:11px">źródło: ${E(t.source)}</span>` : ""}
+    <span class="mono dim" style="font-size:11px">${E(t.id)}</span>
+    ${t.draftRevision > 0 ? `<span class="dim" style="font-size:11px">rewizja szkicu ${t.draftRevision}</span>` : ""}
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px">
+    ${qualChip("Problem", t.qualification.problem)}
+    ${qualChip("Budżet", t.qualification.budget)}
+    ${qualChip("Decydent", t.qualification.decisionMaker)}
+  </div>
+  ${t.messages.length === 0 ? '<p class="dim" style="font-size:12px">Brak wiadomości — wklej pierwszą wiadomość od leada poniżej.</p>' : t.messages.map(renderLeadMessage).join("")}
+  ${draft ? `<div class="idle-box" style="margin:8px 0">
+    <div class="kicker">Szkic czeka na Ciebie</div>
+    <strong>Skopiuj powyższy szkic, w razie potrzeby popraw i wyślij WŁASNYM kanałem — fabryka nie wysyła niczego.</strong>
+  </div>` : ""}
+  ${closed ? `<p class="dim" style="font-size:12px">Wątek zamknięty (${E(statusLabel(t.status))}).</p>` : `
+  <div class="admin-actions">
+    <form method="POST" action="/api/lead-engine" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:240px">
+      <input type="hidden" name="action" value="incoming">
+      <input type="hidden" name="threadId" value="${E(t.id)}">
+      <textarea name="text" placeholder="Wklej nową wiadomość OD leada..." required style="min-height:56px"></textarea>
+      <button class="ok" type="submit" style="align-self:flex-start">Dodaj wiadomość leada → LEA szkicuje</button>
+    </form>
+    <form method="POST" action="/api/lead-engine">
+      <input type="hidden" name="action" value="redraft">
+      <input type="hidden" name="threadId" value="${E(t.id)}">
+      <input name="feedback" placeholder="Feedback do szkicu (opcjonalnie)...">
+      <button type="submit" style="background:#34270a;color:#d29922;border-color:#4d3c14">Przeredaguj szkic</button>
+    </form>
+    <form method="POST" action="/api/lead-engine">
+      <input type="hidden" name="action" value="proposal">
+      <input type="hidden" name="threadId" value="${E(t.id)}">
+      <button type="submit" style="background:#0f2740;color:#58a6ff;border-color:#1c3a5e">Szkic oferty</button>
+    </form>
+    <form method="POST" action="/api/lead-engine" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:240px">
+      <input type="hidden" name="action" value="mark-sent">
+      <input type="hidden" name="threadId" value="${E(t.id)}">
+      <textarea name="text" placeholder="Treść, którą FAKTYCZNIE wysłałeś (możesz wkleić poprawioną wersję szkicu)..." required style="min-height:56px"></textarea>
+      <button type="submit" style="align-self:flex-start">Oznacz jako wysłane przeze mnie</button>
+    </form>
+    <form method="POST" action="/api/lead-engine" style="display:flex;gap:6px;align-items:center">
+      <input type="hidden" name="action" value="status">
+      <input type="hidden" name="threadId" value="${E(t.id)}">
+      <select name="status" required>
+        <option value="">status...</option>
+        <option value="won">wygrany</option>
+        <option value="lost">przegrany</option>
+      </select>
+      <input name="note" placeholder="notatka (opcjonalnie)" style="min-width:120px">
+      <button type="submit">Zamknij wątek</button>
+    </form>
+  </div>`}
+</div>`
+  }
+
+  return layout("Silnik Leadów", "/lead-engine", `
+<h1>Silnik Leadów — LEA (Dyrektor Wzrostu)</h1>
+<p class="sub">
+  ${badge(mode === "anthropic" ? "MÓZG: Claude (live)" : "MÓZG: szablon (offline)", mode === "anthropic" ? "ok" : "muted")}
+  ${badge("TRYB BEZPIECZNY — brak wysyłki na zewnątrz", "ok")}
+  <span class="dim" style="font-size:12px">LEA kwalifikuje (problem → budżet → decydent) i redaguje odpowiedzi — wysyłasz je zawsze Ty, własnym kanałem.</span>
+</p>
+${flashHtml}
+
+<section class="admin-grid" aria-label="Lead Engine Summary">
+  <div class="admin-card"><div class="v info">${state.leadThreads.length}</div><div class="l">Wątki razem</div></div>
+  <div class="admin-card"><div class="v ${active.length ? "warn" : "ok"}">${active.length}</div><div class="l">Aktywne wątki</div></div>
+  <div class="admin-card"><div class="v ${awaiting.length ? "warn" : "ok"}">${awaiting.length}</div><div class="l">Szkice do wysłania</div></div>
+  <div class="admin-card"><div class="v ok">${qualified.length}</div><div class="l">Zakwalifikowane / wygrane</div></div>
+</section>
+
+<div class="form-card">
+  <label>Nowy lead — kto napisał i którędy?</label>
+  <form method="POST" action="/api/lead-engine">
+    <input type="hidden" name="action" value="create">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <input name="leadName" placeholder="Imię i nazwisko / nazwa leada" required style="flex:1;min-width:180px;${inputStyle}">
+      <input name="company" placeholder="Firma (opcjonalnie)" style="flex:1;min-width:160px;${inputStyle}">
+      <input name="source" placeholder="Źródło: LinkedIn / mail / polecenie..." style="min-width:160px;${inputStyle}">
+    </div>
+    <textarea name="firstMessage" placeholder="Wklej pierwszą wiadomość od leada (opcjonalnie — LEA od razu przygotuje szkic odpowiedzi)"></textarea>
+    <div style="margin-top:8px"><button type="submit">Utwórz wątek leada</button></div>
+  </form>
+</div>
+
+<h2>Wątki (${threads.length})</h2>
+${threads.length === 0 ? '<p class="dim">Brak wątków. Dodaj pierwszego leada powyżej.</p>' : threads.map(renderThread).join("")}`)
+}
+
 function renderEvents(state: FactoryState): string {
   const events = [...state.events].reverse()
   return layout("Zdarzenia", "/events", `
@@ -1913,6 +2077,7 @@ export const requestHandler = async (req: IncomingMessage, res: ServerResponse):
       if (url === "/factory-run") return html(res, renderFactoryRun(state))
       if (url === "/delivery") return html(res, renderDelivery(state))
       if (url === "/production-line") return html(res, renderProductionLine(state))
+      if (url === "/lead-engine") return html(res, renderLeadEngine(state))
 
       // Read-only debug endpoints — no store mutation, JSON only (Phase 2).
       if (url === "/api/admin/state") {
@@ -1926,6 +2091,12 @@ export const requestHandler = async (req: IncomingMessage, res: ServerResponse):
           nextOperatorAction: { title: ops.nextActionTitle, detail: ops.nextActionDetail },
           waiting: ops.waiting,
           integrity: getIntegrityRecords(store),
+          leadEngine: {
+            drafterMode: leadDrafterMode(),
+            threads: state.leadThreads.length,
+            active: state.leadThreads.filter((t) => t.status !== "won" && t.status !== "lost").length,
+            awaitingSend: state.leadThreads.filter((t) => pendingDraftFor(t) !== undefined).length,
+          },
           businessLoop: {
             servicesInCatalog: SERVICE_CATALOG.length,
             activeOrders: state.orders.filter((o) => o.status === "new" || o.status === "in_production").length,
@@ -1987,6 +2158,14 @@ export const requestHandler = async (req: IncomingMessage, res: ServerResponse):
           total: state.deliveryPacks.length,
           packs: [...state.deliveryPacks].reverse().slice(0, 20),
           caseRecords: [...state.caseRecords].reverse().slice(0, 20),
+        })
+      }
+      if (url === "/api/lead-engine") {
+        return json(res, {
+          drafterMode: leadDrafterMode(),
+          total: state.leadThreads.length,
+          awaitingSend: state.leadThreads.filter((t) => pendingDraftFor(t) !== undefined).length,
+          threads: [...state.leadThreads].reverse().slice(0, 50),
         })
       }
 
@@ -2273,6 +2452,71 @@ export const requestHandler = async (req: IncomingMessage, res: ServerResponse):
         updated
           ? `Reset integralności dla ${agentIdRaw} (${reasonRaw}) — produkcja kliencka ponownie włączona (decyzja God Layer).`
           : `Nic do zresetowania dla ${agentIdRaw} — nos już na 0.`))
+    }
+
+    if (method === "POST" && url === "/api/lead-engine") {
+      const params = await readBody(req)
+      const action = (params["action"] ?? "").trim()
+      const respond = (flash: string) => html(res, renderLeadEngine(store.snapshot(), flash))
+
+      if (action === "create") {
+        const leadName = (params["leadName"] ?? "").trim()
+        if (!leadName) return json(res, { error: "missing leadName" }, 400)
+        const company = (params["company"] ?? "").trim()
+        const source = (params["source"] ?? "").trim()
+        const firstMessage = (params["firstMessage"] ?? "").trim()
+        const thread = createLeadThread(store, {
+          leadName,
+          ...(company ? { company } : {}),
+          ...(source ? { source } : {}),
+        })
+        if (firstMessage) {
+          await recordIncomingLeadMessage(store, thread.id, firstMessage)
+          return respond(`Wątek ${thread.id} utworzony — LEA przygotował pierwszy szkic odpowiedzi.`)
+        }
+        return respond(`Wątek ${thread.id} utworzony dla ${leadName}.`)
+      }
+
+      // Wszystkie pozostałe akcje wymagają istniejącego wątku — walidacja
+      // przed jakimkolwiek zapisem (400 = zero zapisów, jak w /api/integrity).
+      const threadId = (params["threadId"] ?? "").trim()
+      if (!threadId) return json(res, { error: "missing threadId" }, 400)
+      if (!store.getLeadThread(threadId)) {
+        return json(res, { error: "unknown thread", received: threadId }, 400)
+      }
+
+      if (action === "incoming") {
+        const text = (params["text"] ?? "").trim()
+        if (!text) return json(res, { error: "missing text" }, 400)
+        await recordIncomingLeadMessage(store, threadId, text)
+        return respond("Wiadomość leada zapisana — LEA przygotował szkic odpowiedzi.")
+      }
+      if (action === "redraft") {
+        const feedback = (params["feedback"] ?? "").trim()
+        await redraftLeadReply(store, threadId, feedback || undefined)
+        return respond("LEA przeredagował szkic.")
+      }
+      if (action === "proposal") {
+        await draftLeadProposal(store, threadId)
+        return respond("LEA przygotował szkic oferty — przejrzyj i wyślij samodzielnie.")
+      }
+      if (action === "mark-sent") {
+        const text = (params["text"] ?? "").trim()
+        if (!text) return json(res, { error: "missing text" }, 400)
+        markLeadReplySent(store, threadId, text)
+        return respond("Zapisano: odpowiedź wysłana przez Ciebie własnym kanałem.")
+      }
+      if (action === "status") {
+        const statusRaw = (params["status"] ?? "").trim()
+        if (!statusRaw) return json(res, { error: "missing status", allowed: LEAD_THREAD_STATUSES }, 400)
+        if (!isValidLeadThreadStatus(statusRaw)) {
+          return json(res, { error: "invalid status", received: statusRaw, allowed: LEAD_THREAD_STATUSES }, 400)
+        }
+        const note = (params["note"] ?? "").trim()
+        setLeadThreadStatus(store, threadId, statusRaw, note || undefined)
+        return respond(`Status wątku zmieniony na: ${statusLabel(statusRaw)}.`)
+      }
+      return json(res, { error: "unknown lead-engine action", received: action }, 400)
     }
 
     if (method === "POST" && url === "/api/autopilot") {
