@@ -21,6 +21,7 @@ import {
   type LeadDrafter,
 } from "@ratio-essendi/lead-engine"
 import type { FactoryStore } from "./store.js"
+import type { OperatorActionMetadataValue } from "./persistence/persistence-port.js"
 import type {
   LeadThread,
   LeadThreadMessage,
@@ -68,6 +69,25 @@ function addEvent(store: FactoryStore, eventType: string, detail: string): void 
   })
 }
 
+function addOperatorAction(
+  store: FactoryStore,
+  action: string,
+  threadId: string,
+  detail: string,
+  metadata?: Record<string, OperatorActionMetadataValue>,
+): void {
+  store.addOperatorAction({
+    id: randomUUID(),
+    timestamp: nowIso(),
+    actor: "operator",
+    action,
+    targetType: "lead_thread",
+    targetId: threadId,
+    detail,
+    ...(metadata ? { metadata } : {}),
+  })
+}
+
 /** Historia wątku w formacie warstwy redagującej (lead / wysłane przez operatora). */
 function historyFor(thread: LeadThread): LeadChatMessage[] {
   return thread.messages
@@ -110,6 +130,13 @@ export function createLeadThread(store: FactoryStore, input: CreateLeadThreadInp
     updatedAt: now,
   }
   store.addLeadThread(thread)
+  addOperatorAction(
+    store,
+    "lead.thread.create",
+    thread.id,
+    `Operator utworzył wątek leada ${thread.leadName}.`,
+    { leadName: thread.leadName, company: thread.company ?? null, source: thread.source ?? null },
+  )
   addEvent(store, "lead.thread_created", `Nowy wątek leada: ${thread.leadName}${thread.company ? ` (${thread.company})` : ""} [${thread.id}]`)
   return thread
 }
@@ -183,6 +210,13 @@ export async function recordIncomingLeadMessage(
     draftRevision: 0,
     updatedAt: now,
   })
+  addOperatorAction(
+    store,
+    "lead.message.capture",
+    threadId,
+    `Operator wkleił wiadomość otrzymaną od leada ${thread.leadName}.`,
+    { characters: text.length },
+  )
   addEvent(store, "lead.message_received", `Wiadomość od leada ${thread.leadName} [${threadId}]: ${text.length > 120 ? `${text.slice(0, 120)}...` : text}`)
   if (newlyKnown.length > 0) {
     addEvent(store, "lead.qualified", `Kwalifikacja ${thread.leadName} [${threadId}]: ${newlyKnown.join("; ")}. Status: ${status}.`)
@@ -207,6 +241,13 @@ export async function redraftLeadReply(
   if (!thread) return undefined
   const draft = await appendDraft(store, thread, "reply", feedback)
   store.updateLeadThread(threadId, { draftRevision: thread.draftRevision + 1, updatedAt: nowIso() })
+  addOperatorAction(
+    store,
+    "lead.reply.redraft",
+    threadId,
+    `Operator zażądał przeredagowania szkicu dla ${thread.leadName}.`,
+    { revision: thread.draftRevision + 1, feedbackProvided: Boolean(feedback) },
+  )
   addEvent(store, "lead.reply_redrafted", `LEA przeredagował szkic dla ${thread.leadName} [${threadId}] (rewizja ${thread.draftRevision + 1}${feedback ? `, feedback: ${feedback}` : ""}, mózg: ${draft.draftMode}).`)
   return store.getLeadThread(threadId)
 }
@@ -219,6 +260,12 @@ export async function draftLeadProposal(
   const thread = store.getLeadThread(threadId)
   if (!thread) return undefined
   const draft = await appendDraft(store, thread, "proposal")
+  addOperatorAction(
+    store,
+    "lead.proposal.request",
+    threadId,
+    `Operator zlecił przygotowanie propozycji dla ${thread.leadName}.`,
+  )
   addEvent(store, "lead.proposal_drafted", `LEA przygotował szkic propozycji dla ${thread.leadName} [${threadId}] (mózg: ${draft.draftMode}). Operator wysyła ją samodzielnie.`)
   return store.getLeadThread(threadId)
 }
@@ -247,6 +294,13 @@ export function markLeadReplySent(
     draftRevision: 0,
     updatedAt: now,
   })
+  addOperatorAction(
+    store,
+    "lead.reply.mark_sent",
+    threadId,
+    `Operator potwierdził ręczną wysyłkę odpowiedzi do ${thread.leadName}.`,
+    { characters: text.length, externalSendPerformedByFactory: false },
+  )
   addEvent(store, "lead.marked_sent", `Operator oznaczył odpowiedź do ${thread.leadName} [${threadId}] jako wysłaną WŁASNYM kanałem. Fabryka nie wysłała niczego.`)
   return store.getLeadThread(threadId)
 }
@@ -261,6 +315,13 @@ export function setLeadThreadStatus(
   const thread = store.getLeadThread(threadId)
   if (!thread) return undefined
   store.updateLeadThread(threadId, { status, updatedAt: nowIso() })
+  addOperatorAction(
+    store,
+    "lead.status.set",
+    threadId,
+    `Operator zmienił status leada ${thread.leadName}: ${thread.status} → ${status}.`,
+    { previousStatus: thread.status, status, note: note ?? null },
+  )
   addEvent(store, "lead.status_changed", `Status ${thread.leadName} [${threadId}]: ${thread.status} → ${status} (operator${note ? `: ${note}` : ""}).`)
   return store.getLeadThread(threadId)
 }

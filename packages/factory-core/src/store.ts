@@ -20,6 +20,8 @@ import type {
   MissionAgentId,
   LeadThread,
 } from "./types.js"
+import type { OperatorAction, PersistencePort } from "./persistence/persistence-port.js"
+import { createPersistenceFromEnvironment } from "./persistence/environment.js"
 
 export class JsonStore<T> {
   readonly #path: string
@@ -56,13 +58,24 @@ export class JsonStore<T> {
 /** Operator-controlled runtime settings that must survive a restart. */
 type FactorySettings = { autopilotEnabled: boolean }
 
+const registeredStores = new Set<FactoryStore>()
+
+/** Initialize every FactoryStore created by the runtime composition root. */
+export async function initializeRegisteredPersistence(): Promise<void> {
+  await Promise.all([...registeredStores].map((store) => store.initializePersistence()))
+}
+
+/** Flush queued remote writes before a serverless request is allowed to finish. */
+export async function flushRegisteredPersistence(): Promise<void> {
+  await Promise.all([...registeredStores].map((store) => store.flushPersistence()))
+}
+
 export class FactoryStore {
   readonly #signals: JsonStore<Signal[]>
   readonly #leads: JsonStore<QualifiedLead[]>
   readonly #approval: JsonStore<ApprovalItem[]>
   readonly #warehouse: JsonStore<WarehouseItem[]>
   readonly #trash: JsonStore<TrashItem[]>
-  readonly #events: JsonStore<FactoryEvent[]>
   readonly #dailyDigitals: JsonStore<DailyDigital[]>
   readonly #dailyMissions: JsonStore<DailyMission[]>
   readonly #feedbackEvents: JsonStore<FeedbackEvent[]>
@@ -72,16 +85,15 @@ export class FactoryStore {
   readonly #deliveryPacks: JsonStore<DeliveryPack[]>
   readonly #caseRecords: JsonStore<CaseRecord[]>
   readonly #integrity: JsonStore<AgentIntegrityRecord[]>
-  readonly #leadThreads: JsonStore<LeadThread[]>
+  readonly #persistence: PersistencePort
 
-  constructor(dataDir: string) {
+  constructor(dataDir: string, persistence?: PersistencePort) {
     const p = (name: string) => join(dataDir, `${name}.json`)
     this.#signals = new JsonStore(p("signals"), [])
     this.#leads = new JsonStore(p("leads"), [])
     this.#approval = new JsonStore(p("approval"), [])
     this.#warehouse = new JsonStore(p("warehouse"), [])
     this.#trash = new JsonStore(p("trash"), [])
-    this.#events = new JsonStore(p("events"), [])
     this.#dailyDigitals = new JsonStore(p("daily-digitals"), [])
     this.#dailyMissions = new JsonStore(p("daily-missions"), [])
     this.#feedbackEvents = new JsonStore(p("feedback-events"), [])
@@ -91,17 +103,35 @@ export class FactoryStore {
     this.#deliveryPacks = new JsonStore(p("delivery-packs"), [])
     this.#caseRecords = new JsonStore(p("case-records"), [])
     this.#integrity = new JsonStore(p("integrity"), [])
-    this.#leadThreads = new JsonStore(p("lead-threads"), [])
+    this.#persistence = persistence ?? createPersistenceFromEnvironment(dataDir)
+    registeredStores.add(this)
+  }
+
+  get persistenceDriver(): PersistencePort["driver"] {
+    return this.#persistence.driver
+  }
+
+  async initializePersistence(): Promise<void> {
+    await this.#persistence.initialize()
+  }
+
+  async flushPersistence(): Promise<void> {
+    await this.#persistence.flush()
+  }
+
+  getOperatorActions(): OperatorAction[] {
+    return this.#persistence.snapshot().operatorActions
   }
 
   snapshot(): FactoryState {
+    const durable = this.#persistence.snapshot()
     return {
       signals: this.#signals.read(),
       leads: this.#leads.read(),
       approvalQueue: this.#approval.read(),
       warehouse: this.#warehouse.read(),
       trash: this.#trash.read(),
-      events: this.#events.read(),
+      events: durable.factoryEvents,
       dailyDigitals: this.#dailyDigitals.read(),
       dailyMissions: this.#dailyMissions.read(),
       feedbackEvents: this.#feedbackEvents.read(),
@@ -110,7 +140,7 @@ export class FactoryStore {
       deliveryPacks: this.#deliveryPacks.read(),
       caseRecords: this.#caseRecords.read(),
       integrity: this.#integrity.read(),
-      leadThreads: this.#leadThreads.read(),
+      leadThreads: durable.leadThreads,
     }
   }
 
@@ -145,7 +175,11 @@ export class FactoryStore {
   }
 
   addEvent(e: FactoryEvent): void {
-    this.#events.update((arr) => [...arr, e])
+    this.#persistence.addFactoryEvent(e)
+  }
+
+  addOperatorAction(action: OperatorAction): void {
+    this.#persistence.addOperatorAction(action)
   }
 
   getApprovalItem(id: string): ApprovalItem | undefined {
@@ -237,15 +271,15 @@ export class FactoryStore {
   // --- Lead Engine (LEA) ---
 
   getLeadThread(id: string): LeadThread | undefined {
-    return this.#leadThreads.read().find((t) => t.id === id)
+    return this.#persistence.snapshot().leadThreads.find((thread) => thread.id === id)
   }
 
-  addLeadThread(t: LeadThread): void {
-    this.#leadThreads.update((arr) => [...arr, t])
+  addLeadThread(thread: LeadThread): void {
+    this.#persistence.addLeadThread(thread)
   }
 
   updateLeadThread(id: string, patch: Partial<LeadThread>): void {
-    this.#leadThreads.update((arr) => arr.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+    this.#persistence.updateLeadThread(id, patch)
   }
 
   // --- Settings (survive restarts) ---
