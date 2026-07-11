@@ -50,7 +50,26 @@ export type {
   LeadThreadStatus,
 } from "./types.js"
 
-export { JsonStore, FactoryStore } from "./store.js"
+export type {
+  OperatorAction,
+  OperatorActionMetadataValue,
+  OperatorActionTarget,
+  PersistedLeadMessage,
+  PersistenceDriver,
+  PersistencePort,
+  PersistenceSnapshot,
+} from "./persistence/persistence-port.js"
+export type { PersistenceFetch } from "./persistence/supabase-postgres-adapter.js"
+
+export {
+  JsonStore,
+  FactoryStore,
+  initializeRegisteredPersistence,
+  flushRegisteredPersistence,
+} from "./store.js"
+export { JsonPersistenceAdapter } from "./persistence/json-adapter.js"
+export { SupabasePostgresPersistenceAdapter } from "./persistence/supabase-postgres-adapter.js"
+export { createPersistenceFromEnvironment } from "./persistence/environment.js"
 export { AGENT_REGISTRY, getAgent, validateRegistry } from "./registry.js"
 export { agentA, agentB, agentC, agentD, agentE, agentF, agentG, agentH, agentI } from "./agents.js"
 export { runFactoryOnce, runOfferAcquisitionForSignal } from "./pipeline.js"
