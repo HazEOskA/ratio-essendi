@@ -18,6 +18,7 @@ import type {
   CaseRecord,
   AgentIntegrityRecord,
   MissionAgentId,
+  LeadThread,
 } from "./types.js"
 
 export class JsonStore<T> {
@@ -71,6 +72,7 @@ export class FactoryStore {
   readonly #deliveryPacks: JsonStore<DeliveryPack[]>
   readonly #caseRecords: JsonStore<CaseRecord[]>
   readonly #integrity: JsonStore<AgentIntegrityRecord[]>
+  readonly #leadThreads: JsonStore<LeadThread[]>
 
   constructor(dataDir: string) {
     const p = (name: string) => join(dataDir, `${name}.json`)
@@ -89,6 +91,7 @@ export class FactoryStore {
     this.#deliveryPacks = new JsonStore(p("delivery-packs"), [])
     this.#caseRecords = new JsonStore(p("case-records"), [])
     this.#integrity = new JsonStore(p("integrity"), [])
+    this.#leadThreads = new JsonStore(p("lead-threads"), [])
   }
 
   snapshot(): FactoryState {
@@ -107,6 +110,7 @@ export class FactoryStore {
       deliveryPacks: this.#deliveryPacks.read(),
       caseRecords: this.#caseRecords.read(),
       integrity: this.#integrity.read(),
+      leadThreads: this.#leadThreads.read(),
     }
   }
 
@@ -228,6 +232,20 @@ export class FactoryStore {
       if (idx === -1) return [...arr, rec]
       return arr.map((r, i) => (i === idx ? rec : r))
     })
+  }
+
+  // --- Lead Engine (LEA) ---
+
+  getLeadThread(id: string): LeadThread | undefined {
+    return this.#leadThreads.read().find((t) => t.id === id)
+  }
+
+  addLeadThread(t: LeadThread): void {
+    this.#leadThreads.update((arr) => [...arr, t])
+  }
+
+  updateLeadThread(id: string, patch: Partial<LeadThread>): void {
+    this.#leadThreads.update((arr) => arr.map((t) => (t.id === id ? { ...t, ...patch } : t)))
   }
 
   // --- Settings (survive restarts) ---

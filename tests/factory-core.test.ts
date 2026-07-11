@@ -68,12 +68,12 @@ function unqualifiedSignal(): Signal {
 
 // 1. Registry validation
 
-test("registry: all 19 agents defined (14 pipeline + 5 producers)", () => {
-  assert.equal(AGENT_REGISTRY.length, 19)
+test("registry: all 20 agents defined (14 pipeline + 5 producers + LEA)", () => {
+  assert.equal(AGENT_REGISTRY.length, 20)
   const ids = AGENT_REGISTRY.map((a) => a.id)
   for (const id of [
     "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
-    "MA", "SA", "DA", "RA", "QAA",
+    "MA", "SA", "DA", "RA", "QAA", "LEA",
   ] as const) {
     assert.ok(ids.includes(id), `Agent ${id} missing from registry`)
   }

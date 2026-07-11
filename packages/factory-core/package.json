@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Factory Core v0.1 — Job Queue, 14-agent registry, Offer Acquisition Line pipeline.",
+  "description": "Factory Core v0.1 \u2014 Job Queue, 14-agent registry, Offer Acquisition Line pipeline.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
@@ -13,7 +13,8 @@
     "@ratio-essendi/shared": "*",
     "@ratio-essendi/evaluation-engine": "*",
     "@ratio-essendi/offer-builder": "*",
-    "@ratio-essendi/integrity-guard": "*"
+    "@ratio-essendi/integrity-guard": "*",
+    "@ratio-essendi/lead-engine": "*"
   },
   "license": "UNLICENSED"
 }

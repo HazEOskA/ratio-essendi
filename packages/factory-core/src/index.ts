@@ -43,6 +43,11 @@ export type {
   ProductionLineView,
   AgentIntegrityRecord,
   AgentIntegrityStatus,
+  LeadThread,
+  LeadThreadMessage,
+  LeadThreadMessageAuthor,
+  LeadThreadQualification,
+  LeadThreadStatus,
 } from "./types.js"
 
 export { JsonStore, FactoryStore } from "./store.js"
@@ -78,3 +83,17 @@ export {
   PRODUCER_AGENTS,
 } from "./integrity.js"
 export type { IntegrityResetReason } from "./integrity.js"
+export {
+  getLeadThreads,
+  createLeadThread,
+  recordIncomingLeadMessage,
+  redraftLeadReply,
+  draftLeadProposal,
+  markLeadReplySent,
+  setLeadThreadStatus,
+  pendingDraftFor,
+  isValidLeadThreadStatus,
+  leadDrafterMode,
+  setLeadDrafterForTests,
+  LEAD_THREAD_STATUSES,
+} from "./lead-engine.js"
