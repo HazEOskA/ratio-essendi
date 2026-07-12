@@ -1,6 +1,7 @@
 import { STITCH_CSS } from "./stitch-ui-styles.js"
 import { STITCH_REFINEMENT_CSS } from "./stitch-ui-refinement.js"
 import { STITCH_PRODUCT_CSS } from "./stitch-ui-product-styles.js"
+import { STITCH_NEON_UPGRADE_CSS } from "./stitch-ui-neon-upgrade.js"
 import { STITCH_CLIENT_V2 } from "./stitch-ui-client-v2.js"
 import { STITCH_PRODUCT_CLIENT } from "./stitch-ui-product-client.js"
 
@@ -84,18 +85,26 @@ const nav = (active: string): string => [
   ["/operator", "settings_input_component", "System", "operator"],
 ].map(([href, icon, label, key]) => `<a href="${href}" class="nav-link ${active === key ? "active" : ""}"><span class="material-symbols-outlined">${icon}</span><span>${label}</span></a>`).join("")
 
+function brandLockup(): string {
+  return `<div class="osa-lockup"><span class="osa-emblem" aria-hidden="true"><i></i></span><div><div class="osa-wordmark"><b>Ratio</b> Essendi</div><div class="osa-submark">OsaTechGPT // Agentic System</div></div></div>`
+}
+
 function sidebarHeader(screen: Screen): string {
   if (screen === "lead") {
-    return `<div class="side-brand-block"><div class="stamp">SYSTEM IDENTIFIER</div><div class="side-wordmark">RATIO ESSENDI</div></div>`
+    return `<div class="side-brand-block"><div class="stamp">SYSTEM IDENTIFIER</div>${brandLockup()}</div>`
   }
   if (screen === "operator" || screen === "events" || screen === "trash") {
-    return `<div class="side-brand-block"><div class="stamp">RATIO ESSENDI</div>${operatorCard()}</div>`
+    return `<div class="side-brand-block"><div class="stamp">SYSTEM CONTROL</div>${brandLockup()}${operatorCard()}</div>`
   }
-  return `<div class="identity"><div class="stamp">SYSTEM IDENT</div>${operatorCard()}</div>`
+  return `<div class="identity"><div class="stamp">SYSTEM IDENT</div>${brandLockup()}${operatorCard()}</div>`
 }
 
 function operatorCard(): string {
   return `<div class="operator"><div class="operator-icon"><span class="material-symbols-outlined">shield_person</span></div><div><strong>OPERATOR-01</strong><small>● STATUS: OPERATIONAL</small></div></div>`
+}
+
+function sideSystemCard(): string {
+  return `<div class="side-system-card"><div class="side-system-head"><span>Runtime link</span><span class="side-system-live"><i></i>Live</span></div><div class="side-system-wave" aria-hidden="true"><i style="height:35%"></i><i style="height:72%"></i><i style="height:48%"></i><i style="height:88%"></i><i style="height:62%"></i><i style="height:94%"></i><i style="height:55%"></i><i style="height:78%"></i><i style="height:42%"></i><i style="height:84%"></i><i style="height:58%"></i><i style="height:96%"></i></div></div>`
 }
 
 function notificationControl(screen: Screen, mobile = false): string {
@@ -138,5 +147,5 @@ export function renderStitchUi(req: RequestLike): string {
   const bottomOperator = screen === "lead" ? `<div class="sidebar-operator-bottom">${operatorCard()}</div>` : ""
   const client = usesLegacyClient(screen) ? STITCH_CLIENT_V2 : STITCH_PRODUCT_CLIENT
 
-  return `<!doctype html><html lang="pl" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>RATIO ESSENDI</title><meta name="theme-color" content="#0a0a0a"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet"><style>${STITCH_CSS}${STITCH_REFINEMENT_CSS}${STITCH_PRODUCT_CSS}</style></head><body data-screen="${screen}"><aside class="sidebar">${sidebarHeader(screen)}<nav class="nav">${nav(active)}</nav><div class="side-bottom">${bottomOperator}<a class="button primary block" href="/factory-run">DEPLOY AGENT</a><div class="side-utility"><a class="nav-link" href="/events"><span class="material-symbols-outlined">terminal</span>Logs</a><a class="nav-link" href="${path}?legacy=1"><span class="material-symbols-outlined">help</span>Legacy tools</a></div></div></aside><main class="shell"><header class="mobile-top"><div class="mobile-wordmark"><span class="material-symbols-outlined">terminal</span><strong>RATIO</strong> ESSENDI</div><div class="top-actions">${notificationControl(screen, true)}<a class="mobile-avatar" href="/operator" aria-label="Operator cockpit"><span class="material-symbols-outlined">account_circle</span></a></div></header>${desktopTopbar(screen, path)}<div class="content" id="app"><div class="terminal">LOADING RATIO ESSENDI STATE...</div></div><button class="mobile-fab" data-action="start" data-op="autopilot-on" aria-label="Start operation"><span class="material-symbols-outlined">rocket_launch</span></button><nav class="mobile-bottom"><a href="/admin" class="${active === "command" ? "active" : ""}"><span class="material-symbols-outlined">dashboard</span>COMMAND</a><a href="/lead-engine" class="${active === "lead" ? "active" : ""}"><span class="material-symbols-outlined">psychology</span>INTEL</a><a href="/production-line" class="${active === "logistics" ? "active" : ""}"><span class="material-symbols-outlined">conveyor_belt</span>LOGISTICS</a><a href="/orders" class="${active === "personnel" ? "active" : ""}"><span class="material-symbols-outlined">group</span>PERSONNEL</a><a href="/operator" class="${active === "operator" ? "active" : ""}"><span class="material-symbols-outlined">tune</span>SYSTEM</a></nav></main><div class="modal" id="modal" aria-hidden="true"><div class="modal-card" id="modal-card" role="dialog" aria-modal="true"></div></div><div class="toast" id="toast" role="status"></div><script>${client}</script></body></html>`
+  return `<!doctype html><html lang="pl" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Ratio Essendi — OsaTechGPT</title><meta name="theme-color" content="#020708"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet"><style>${STITCH_CSS}${STITCH_REFINEMENT_CSS}${STITCH_PRODUCT_CSS}${STITCH_NEON_UPGRADE_CSS}</style></head><body data-screen="${screen}"><aside class="sidebar">${sidebarHeader(screen)}<nav class="nav">${nav(active)}</nav><div class="side-bottom">${bottomOperator}${sideSystemCard()}<a class="button primary block" href="/factory-run">DEPLOY AGENT</a><div class="side-powered">Built with <b>OsaTechGPT</b><br>Ratio Essendi Control Layer</div><div class="side-utility"><a class="nav-link" href="/events"><span class="material-symbols-outlined">terminal</span>Logs</a><a class="nav-link" href="${path}?legacy=1"><span class="material-symbols-outlined">help</span>Legacy tools</a></div></div></aside><main class="shell"><header class="mobile-top"><div class="mobile-wordmark"><span class="material-symbols-outlined">hub</span><strong>RATIO</strong> ESSENDI</div><div class="top-actions">${notificationControl(screen, true)}<a class="mobile-avatar" href="/operator" aria-label="Operator cockpit"><span class="material-symbols-outlined">account_circle</span></a></div></header>${desktopTopbar(screen, path)}<div class="content" id="app"><div class="terminal">LOADING RATIO ESSENDI STATE...</div></div><button class="mobile-fab" data-action="start" data-op="autopilot-on" aria-label="Start operation"><span class="material-symbols-outlined">rocket_launch</span></button><nav class="mobile-bottom"><a href="/admin" class="${active === "command" ? "active" : ""}"><span class="material-symbols-outlined">dashboard</span>COMMAND</a><a href="/lead-engine" class="${active === "lead" ? "active" : ""}"><span class="material-symbols-outlined">psychology</span>INTEL</a><a href="/production-line" class="${active === "logistics" ? "active" : ""}"><span class="material-symbols-outlined">conveyor_belt</span>LOGISTICS</a><a href="/orders" class="${active === "personnel" ? "active" : ""}"><span class="material-symbols-outlined">group</span>PERSONNEL</a><a href="/operator" class="${active === "operator" ? "active" : ""}"><span class="material-symbols-outlined">tune</span>SYSTEM</a></nav></main><div class="modal" id="modal" aria-hidden="true"><div class="modal-card" id="modal-card" role="dialog" aria-modal="true"></div></div><div class="toast" id="toast" role="status"></div><script>${client}</script></body></html>`
 }
