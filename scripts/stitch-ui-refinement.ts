@@ -54,7 +54,7 @@ export const STITCH_REFINEMENT_CSS = String.raw`
 .lead-task .task-meta{display:flex;justify-content:space-between;align-items:center}
 .lead-task .button-row{display:grid;grid-template-columns:1fr 1.25fr;gap:10px;margin-top:auto}
 .staging-panel{position:relative}
-.staging-panel:after{content:"STAGING_AREA";position:absolute;right:-41px;top:80px;transform:rotate(90deg);color:#303938;font:600 13px "JetBrains Mono";letter-spacing:.13em}
+.staging-panel:after{content:"STREFA_SZKICÓW";position:absolute;right:-41px;top:80px;transform:rotate(90deg);color:#303938;font:600 13px "JetBrains Mono";letter-spacing:.13em}
 .draft{border-color:#4c5756;background:#171717}
 .draft-confidence{display:flex;justify-content:space-between;align-items:center;color:#9ba7a6;font:600 8px "JetBrains Mono"}
 .draft-confidence b{color:var(--cyan)}
@@ -65,7 +65,7 @@ export const STITCH_REFINEMENT_CSS = String.raw`
 .status-log .log-warn{color:var(--yellow)}
 .status-log .log-critical{color:var(--mag)}
 .status-log .log-system{color:var(--cyan)}
-.health:after{content:"CORE_STATUS";position:absolute;right:-40px;top:120px;transform:rotate(90deg);color:#242b2b;font:700 33px "JetBrains Mono";letter-spacing:.06em}
+.health:after{content:"STAN_RDZENIA";position:absolute;right:-40px;top:120px;transform:rotate(90deg);color:#242b2b;font:700 33px "JetBrains Mono";letter-spacing:.06em}
 .health{position:relative;overflow:hidden}
 .incident{border-color:#45504f}
 .incident.alert{border-color:#765873}
@@ -128,7 +128,7 @@ export const STITCH_REFINEMENT_CSS = String.raw`
   .split>div:first-child{display:block}
   .split>div:first-child>.section-head{display:none}
   .split>div:first-child>.events{border-radius:14px;overflow:hidden;margin-top:30px}
-  .events:before{content:"SYSTEM TERMINAL OUTPUT                         LIVE";display:block;padding:17px 18px;border-bottom:1px solid var(--line);color:#bfc8c7;font:600 10px "JetBrains Mono";white-space:pre}
+  .events:before{content:"WYJŚCIE TERMINALA SYSTEMU                 NA ŻYWO";display:block;padding:17px 18px;border-bottom:1px solid var(--line);color:#bfc8c7;font:600 10px "JetBrains Mono";white-space:pre}
   .event{grid-template-columns:8px 1fr;min-height:42px;padding:9px 16px}
   .event .event-icon{display:none}
   .event:nth-child(n+4){display:none}
